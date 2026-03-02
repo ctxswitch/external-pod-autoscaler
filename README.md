@@ -4,10 +4,7 @@ A Kubernetes controller that scrapes Prometheus metrics directly from pods and m
 
 ## Install
 
-Requires [cert-manager](https://cert-manager.io/) for TLS certificates.
-
 ```bash
-kustomize build config/cert-manager | kubectl apply -f -
 kustomize build config/epa/base | kubectl apply -f -
 ```
 
