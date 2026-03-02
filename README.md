@@ -1,259 +1,96 @@
 # External Pod Autoscaler
 
-A Kubernetes controller that scrapes Prometheus metrics from pods and automatically manages HPAs to scale deployments based on those metrics. Supports distributed multi-replica operation with automatic work partitioning.
+A Kubernetes controller that scrapes Prometheus metrics directly from pods and manages HPAs to scale deployments based on those metrics.
 
-## Features
-
-- **ExternalPodAutoscaler CRD** — single resource defines scraping + scaling configuration
-- **Auto-managed HPAs** — controller creates, updates, and deletes native Kubernetes HPAs with ownerReferences
-- **Flexible targeting** — scrape from any pods, scale any deployment (queue-worker pattern), or self-scale
-- **Distributed scraping** — multi-replica deployment with rendezvous hashing for EPA ownership partitioning
-- **Admission webhooks** — validating and mutating webhooks for CRD validation and defaults
-- **Sliding window aggregation** — configurable evaluation periods (60s–10min) with avg, max, min, median, last
-- **Per-metric overrides** — each metric can override aggregation type and evaluation period
-- **Counter rate calculation** — automatic rate computation with reset detection
-- **Label-based filtering** — filter Prometheus metrics by label selectors (matchLabels + matchExpressions)
-- **HTTPS support** — TLS scraping with optional certificate verification
-- **Namespace isolation** — all operations scoped to the EPA's namespace
-
-## Quick Start
+## Install
 
 Requires [cert-manager](https://cert-manager.io/) for TLS certificates.
 
 ```bash
-# Install cert-manager
 kustomize build config/cert-manager | kubectl apply -f -
-
-# Install controller
 kustomize build config/epa/base | kubectl apply -f -
 ```
 
 ## Usage
 
-### Queue-Worker Pattern
-
-Scrape metrics from `queue-service` pods, scale `worker` deployment:
+Create an `ExternalPodAutoscaler` resource:
 
 ```yaml
 apiVersion: ctx.sh/v1beta1
 kind: ExternalPodAutoscaler
 metadata:
-  name: queue-worker-scaler
-  namespace: production
+  name: my-app-scaler
+  namespace: default
 spec:
-  minReplicas: 2
-  maxReplicas: 10
-
-  scrape:
-    port: 9090
-    interval: 15s
-    evaluationPeriod: 5m
-    aggregationType: avg
-
-  scrapeTargetRef:
-    kind: Deployment
-    name: queue-service
-
-  scaleTargetRef:
-    kind: Deployment
-    name: worker
-
-  metrics:
-  - metricName: queue_depth
-    type: AverageValue
-    targetValue: "50"
-
-  - metricName: queue_errors_total
-    type: AverageValue
-    targetValue: "5"
-    evaluationPeriod: 2m
-```
-
-This creates an HPA named `queue-worker-scaler` targeting the `worker` deployment with external metrics `queue-worker-scaler-production-queue_depth` and `queue-worker-scaler-production-queue_errors_total`.
-
-### Self-Scaling Pattern
-
-Scrape and scale the same deployment (`scrapeTargetRef` defaults to `scaleTargetRef` when omitted):
-
-```yaml
-apiVersion: ctx.sh/v1beta1
-kind: ExternalPodAutoscaler
-metadata:
-  name: api-scaler
-  namespace: production
-spec:
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 10
 
   scrape:
     port: 8080
-    scheme: https
-    tls:
-      insecureSkipVerify: true
-    evaluationPeriod: 2m
-    aggregationType: median
+    interval: 15s
 
   scaleTargetRef:
     kind: Deployment
-    name: api-server
+    name: my-app
 
   metrics:
-  - metricName: http_requests_total
-    type: AverageValue
+  - metricName: requests_total
     targetValue: "100"
-
-  - metricName: http_request_duration_seconds
-    type: AverageValue
-    targetValue: "0.5"
-    labelSelector:
-      matchLabels:
-        endpoint: /api/users
 ```
 
-### Checking Status
+The controller will scrape the Prometheus metrics endpoint on your pods, aggregate the values over a sliding window, and create a native HPA to scale the target deployment.
+
+If `scrapeTargetRef` is omitted it defaults to `scaleTargetRef`. Set it explicitly to scrape metrics from a different workload than the one being scaled.
 
 ```bash
-# List EPAs
 kubectl get epa
-
-# Describe EPA (shows scrape status, HPA info, conditions)
-kubectl describe epa queue-worker-scaler
-
-# Check managed HPA
-kubectl get hpa queue-worker-scaler
-
-# Query external metrics directly
-kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1/namespaces/production/queue-worker-scaler-production-queue_depth"
+kubectl describe epa my-app-scaler
 ```
 
 ## CRD Reference
 
-### Spec
+| Field | Default | Description                                                                                                                               |
+|---|---|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `minReplicas` | `1` | Minimum replica count                                                                                                                     |
+| `maxReplicas` | *required* | Maximum replica count                                                                                                                     |
+| `scrape.port` | `8080` | Metrics port                                                                                                                              |
+| `scrape.path` | `/metrics` | Metrics path                                                                                                                              |
+| `scrape.interval` | `15s` | Scrape interval                                                                                                                           |
+| `scrape.timeout` | `1s` | Per-pod scrape timeout                                                                                                                    |
+| `scrape.scheme` | `http` | `http` or `https`                                                                                                                         |
+| `scrape.tls.insecureSkipVerify` | `false` | Skip TLS verification                                                                                                                     |
+| `scrape.evaluationPeriod` | `60s` | Sliding window size                                                                                                                       |
+| `scrape.aggregationType` | `avg` | `avg`, `max`, `min`, `median`, `last`                                                                                                     |
+| `scrapeTargetRef` | *(scaleTargetRef)* | Workload whose pods are scraped for metrics.  This allows you to target other services for metrics (think producer/consumer relationship) |
+| `scaleTargetRef` | *required* | Workload to scale                                                                                                                         |
+| `metrics[].metricName` | *required* | Prometheus metric name                                                                                                                    |
+| `metrics[].type` | `AverageValue` | `AverageValue` or `Value`                                                                                                                 |
+| `metrics[].targetValue` | *required* | Target value                                                                                                                              |
+| `metrics[].aggregationType` | *(from scrape)* | Per-metric override                                                                                                                       |
+| `metrics[].evaluationPeriod` | *(from scrape)* | Per-metric override                                                                                                                       |
+| `metrics[].labelSelector` | — | Filter by Prometheus labels                                                                                                               |
+| `behavior` | — | Pass-through to HPA behavior spec                                                                                                         |
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `minReplicas` | int | `1` | Minimum replica count for HPA |
-| `maxReplicas` | int | *required* | Maximum replica count for HPA |
-| `scrape.port` | int | `8080` | Port to scrape metrics from |
-| `scrape.path` | string | `/metrics` | HTTP path for metrics endpoint |
-| `scrape.interval` | duration | `15s` | Scrape interval |
-| `scrape.timeout` | duration | `1s` | Per-pod scrape timeout |
-| `scrape.scheme` | string | `http` | `http` or `https` |
-| `scrape.tls.insecureSkipVerify` | bool | `false` | Skip TLS certificate verification |
-| `scrape.evaluationPeriod` | duration | `60s` | Sliding window size for aggregation |
-| `scrape.aggregationType` | string | `avg` | Default aggregation: `avg`, `max`, `min`, `median`, `last` |
-| `scrapeTargetRef.apiVersion` | string | `apps/v1` | API version of scrape target |
-| `scrapeTargetRef.kind` | string | — | `Deployment`, `StatefulSet`, or `DaemonSet` |
-| `scrapeTargetRef.name` | string | — | Name of scrape target (defaults to `scaleTargetRef` if omitted) |
-| `scaleTargetRef.apiVersion` | string | `apps/v1` | API version of scale target |
-| `scaleTargetRef.kind` | string | *required* | `Deployment`, `StatefulSet`, or `DaemonSet` |
-| `scaleTargetRef.name` | string | *required* | Name of deployment to scale |
-| `metrics[].metricName` | string | *required* | Prometheus metric name |
-| `metrics[].type` | string | `AverageValue` | `AverageValue` or `Value` |
-| `metrics[].targetValue` | string | *required* | Target value (must parse as float) |
-| `metrics[].aggregationType` | string | *(from scrape)* | Per-metric aggregation override |
-| `metrics[].evaluationPeriod` | duration | *(from scrape)* | Per-metric window override |
-| `metrics[].labelSelector.matchLabels` | map | — | AND'd key=value label filter |
-| `metrics[].labelSelector.matchExpressions` | list | — | `In`, `NotIn`, `Exists`, `DoesNotExist` |
-| `behavior` | object | — | Pass-through to HPA `behavior` spec |
-
-Duration fields accept humantime strings: `15s`, `1m`, `5m`, `1h`.
-
-## External Metric Naming
-
-Format: `{epa-name}-{epa-namespace}-{prometheus_metric_name}`
-
-Underscores in the Prometheus metric name are preserved. Kubernetes resource names and namespaces use hyphens (never underscores), so the boundary is unambiguous.
-
-| EPA Name | Namespace | Metric | External Metric Name |
-|---|---|---|---|
-| `queue-worker-scaler` | `production` | `queue_depth` | `queue-worker-scaler-production-queue_depth` |
-| `queue-worker-scaler` | `production` | `queue_errors_total` | `queue-worker-scaler-production-queue_errors_total` |
-| `api-scaler` | `staging` | `http_requests_total` | `api-scaler-staging-http_requests_total` |
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ Controller Binary (runs as 3-replica Deployment)                       │
-│                                                                        │
-│  ┌──────────────┐  ┌───────────────────┐  ┌──────────────────────────┐ │
-│  │ EPA          │  │ Scraper Service   │  │ Webhook/API Server       │ │
-│  │ Controller   │──│ Worker pool (20)  │  │ HTTPS :8443              │ │
-│  │              │  │ Hash-sharded EPAs │  │ - External Metrics API   │ │
-│  │ Reconcile:   │  │ Pod discovery via │  │ - Validating webhook     │ │
-│  │ - Manage HPA │  │   PodCache        │  │ - Mutating webhook       │ │
-│  │ - Sync status│  │ Concurrent scrape │  │ - Cross-replica forward  │ │
-│  └──────────────┘  └───────────────────┘  └──────────────────────────┘ │
-│                                                                        │
-│  ┌─────────────────────┐  ┌──────────────────────────────────────────┐ │
-│  │ Membership Manager  │  │ MetricsStore                             │ │
-│  │ Lease per replica   │  │ Sliding window per (EPA, metric, pod)   │ │
-│  │ Rendezvous hashing  │  │ On-demand aggregation, 10s cache        │ │
-│  └─────────────────────┘  └──────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-**Distributed coordination**: Each replica creates a Kubernetes Lease renewed every 10s. EPA ownership is determined by rendezvous hashing across active replicas. External metrics requests are forwarded to the owning replica if received by a non-owner.
-
-**Aggregation**: Two-stage process. Stage 1: per-pod sliding window aggregation (gauges use configured aggregation type; counters compute rate with reset detection). Stage 2: sum across all pods.
-
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `POD_UID` | *required* | Pod UID for replica identity (downward API) |
-| `POD_IP` | *required* | Pod IP for request forwarding (downward API) |
-| `POD_NAME` | *required* | Pod name for logging (downward API) |
-| `POD_NAMESPACE` | *required* | Namespace for Lease creation (downward API) |
-| `WEBHOOK_PORT` | `8443` | HTTPS server listen port |
-| `ENABLE_WEBHOOKS` | `true` | Set `false` to disable admission webhooks |
-| `SCRAPER_WORKERS` | `20` | Number of scraper worker tasks |
-| `SERVICE_NAMESPACE` | `epa-system` | Namespace for APIService registration |
-| `SERVICE_NAME` | `epa-webhook` | Service name for APIService registration |
-| `LOG_FORMAT` | `text` | `json` for structured production logs |
-| `RUST_LOG` | `external_pod_autoscaler=info,kube=info` | Log level filter |
+Durations accept humantime strings: `15s`, `1m`, `5m`, `1h`.
 
 ## Local Development
 
-Requires [k3d](https://k3d.io/) and [cert-manager](https://cert-manager.io/).
+Requires [k3d](https://k3d.io/).
 
 ```bash
-# Create k3d cluster, install cert-manager, deploy controller
-make localdev
-
-# Tail controller logs
-make logs
-
-# Shell into controller pod
-make exec
-
-# Delete cluster
-make localdev-clean
-
-# Delete and recreate
-make localdev-restart
-
-# Uninstall controller (keep cluster)
-make localdev-uninstall
+make localdev          # Create cluster + deploy controller
+make logs              # Tail controller logs
+make localdev-clean    # Delete cluster
+make localdev-restart  # Delete + recreate
 ```
 
 ## Building
 
 ```bash
-cargo build --release
-cargo test
-cargo clippy --all-targets --all-features
-cargo fmt --check
-```
-
-Or via Makefile:
-
-```bash
-make build
-make test
-make clippy
-make fmt-check
+make build       # cargo build --release
+make test        # cargo test
+make clippy      # cargo clippy
+make fmt-check   # cargo fmt --check
 ```
 
 ## License
