@@ -1,0 +1,13 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: queue-worker-scaler
+  namespace: production
+  uid: hpa-uid-stale
+spec:
+  minReplicas: 10
+  maxReplicas: 99
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker

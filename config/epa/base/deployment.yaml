@@ -1,0 +1,66 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epa-controller
+  namespace: epa-system
+  labels:
+    app: epa-controller
+    app.kubernetes.io/name: external-pod-autoscaler
+spec:
+  # Horizontal scaling: 3+ replicas for distributed scraping
+  replicas: 3
+  selector:
+    matchLabels:
+      app: epa-controller
+  template:
+    metadata:
+      labels:
+        app: epa-controller
+    spec:
+      serviceAccountName: epa-controller
+      containers:
+        - name: controller
+          image: ghcr.io/ctxswitch/external-pod-autoscaler:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/external-pod-autoscaler
+          ports:
+            - containerPort: 8443
+              name: webhook
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: info
+            - name: ENABLE_WEBHOOKS
+              value: "true"
+            - name: SCRAPER_WORKERS
+              value: "20"
+            # Downward API: Pod identity for distributed scraping
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/webhook/tls
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: epa-webhook-cert

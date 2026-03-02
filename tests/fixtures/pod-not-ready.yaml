@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: worker-pod-2
+  namespace: default
+  labels:
+    app: worker
+spec:
+  containers:
+  - name: worker
+    image: worker:latest
+status:
+  phase: Pending
+  conditions:
+  - type: Ready
+    status: "False"

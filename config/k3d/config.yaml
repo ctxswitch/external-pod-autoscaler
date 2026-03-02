@@ -1,0 +1,22 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: epa
+servers: 1
+agents: 1
+image: rancher/k3s:v1.28.12-k3s1
+ports:
+  - port: 8443:30443
+    nodeFilters:
+      - agent:*
+  - port: 8081:30080
+    nodeFilters:
+      - agent:*
+options:
+  k3d:
+    disableLoadbalancer: false
+    disableImageVolume: false
+    disableRollback: false
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

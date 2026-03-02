@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-service
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: queue-service
+  template:
+    metadata:
+      labels:
+        app: queue-service
+    spec:
+      containers:
+      - name: queue-service
+        image: queue-service:latest

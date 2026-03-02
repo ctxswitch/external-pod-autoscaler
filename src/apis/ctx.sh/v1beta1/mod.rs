@@ -1,5 +1,3 @@
-mod metric;
-#[cfg(test)]
-mod metrics_test;
+mod externalpodautoscaler;
 
-pub use metric::*;
+pub use externalpodautoscaler::*;

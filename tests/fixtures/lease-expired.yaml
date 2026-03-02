@@ -1,0 +1,13 @@
+apiVersion: coordination.k8s.io/v1
+kind: Lease
+metadata:
+  name: epa-replica-replica-expired
+  namespace: test-ns
+  labels:
+    app: external-pod-autoscaler
+    replica-id: replica-expired
+spec:
+  holderIdentity: "10.0.0.20:8443"
+  leaseDurationSeconds: 30
+  renewTime: "2020-01-01T00:00:00.000000Z"
+  acquireTime: "2020-01-01T00:00:00.000000Z"

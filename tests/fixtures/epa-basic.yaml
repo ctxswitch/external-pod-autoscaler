@@ -1,0 +1,25 @@
+apiVersion: ctx.sh/v1beta1
+kind: ExternalPodAutoscaler
+metadata:
+  name: queue-worker-scaler
+  namespace: production
+  uid: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+spec:
+  minReplicas: 1
+  maxReplicas: 5
+  scrape:
+    port: 8080
+    path: /metrics
+    interval: 15s
+    timeout: 1s
+    scheme: http
+    evaluationPeriod: 60s
+    aggregationType: avg
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  metrics:
+  - metricName: queue_depth
+    type: AverageValue
+    targetValue: "50"

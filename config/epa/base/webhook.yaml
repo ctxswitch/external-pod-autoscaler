@@ -1,0 +1,95 @@
+---
+# Certificate for webhook TLS
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: epa-webhook-cert
+  namespace: epa-system
+spec:
+  dnsNames:
+    - epa-webhook.epa-system.svc
+    - epa-webhook.epa-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: epa-selfsigned-issuer
+  secretName: epa-webhook-cert
+
+---
+# Self-signed issuer for webhook certificates
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: epa-selfsigned-issuer
+  namespace: epa-system
+spec:
+  selfSigned: {}
+
+---
+# Validating webhook configuration for ExternalPodAutoscaler
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: epa-validating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: epa-system/epa-webhook-cert
+webhooks:
+  - name: validate.externalpodautoscaler.ctx.sh
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: epa-webhook
+        namespace: epa-system
+        path: /validate-ctx-sh-v1beta1-externalpodautoscaler
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Exact
+    rules:
+      - apiGroups:
+          - ctx.sh
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - externalpodautoscalers
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
+
+---
+# Mutating webhook configuration for ExternalPodAutoscaler
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: epa-mutating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: epa-system/epa-webhook-cert
+webhooks:
+  - name: mutate.externalpodautoscaler.ctx.sh
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: epa-webhook
+        namespace: epa-system
+        path: /mutate-ctx-sh-v1beta1-externalpodautoscaler
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Exact
+    rules:
+      - apiGroups:
+          - ctx.sh
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - externalpodautoscalers
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10

@@ -1,3 +1,8 @@
+# Rust
 /target
+**/*.rs.bk
+*.pdb
 
-.idea
+# IDE
+.idea/
+.claude/

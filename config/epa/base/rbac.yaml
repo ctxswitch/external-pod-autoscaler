@@ -1,0 +1,132 @@
+---
+# ClusterRole for the external-pod-autoscaler controller
+# Based on the actual operations performed by the controller
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: epa-controller-role
+rules:
+  # CustomResourceDefinition management
+  # Controller installs/updates its own CRD on startup
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+
+  # APIService management
+  # Controller registers itself as external metrics provider on startup
+  - apiGroups:
+      - apiregistration.k8s.io
+    resources:
+      - apiservices
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+
+  # ExternalPodAutoscaler CRD access
+  # Controller watches, reads, and updates EPA resources
+  - apiGroups:
+      - ctx.sh
+    resources:
+      - externalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  - apiGroups:
+      - ctx.sh
+    resources:
+      - externalpodautoscalers/status
+    verbs:
+      - get
+      - update
+      - patch
+
+  # HorizontalPodAutoscaler management
+  # Controller creates and manages HPA resources for each EPA
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Pod access for metrics scraping
+  # Scraper service lists pods and scrapes their metrics endpoints
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Namespace access
+  # May be needed for multi-namespace operations
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Lease access for distributed scraping
+  # Membership manager creates and watches Leases for replica discovery
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+
+  # Workload resource access
+  # Controller needs to resolve Deployment/StatefulSet/DaemonSet for pod selectors
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: epa-controller-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: epa-controller-role
+subjects:
+  - kind: ServiceAccount
+    name: epa-controller
+    namespace: epa-system

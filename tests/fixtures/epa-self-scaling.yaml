@@ -1,0 +1,25 @@
+apiVersion: ctx.sh/v1beta1
+kind: ExternalPodAutoscaler
+metadata:
+  name: api-scaler
+  namespace: staging
+  uid: self-1111-2222-3333-444444444444
+spec:
+  minReplicas: 1
+  maxReplicas: 8
+  scrape:
+    port: 8080
+    path: /metrics
+    interval: 15s
+    timeout: 1s
+    scheme: http
+    evaluationPeriod: 60s
+    aggregationType: avg
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-service
+  metrics:
+  - metricName: http_requests_total
+    type: AverageValue
+    targetValue: "100"
