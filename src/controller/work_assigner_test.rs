@@ -33,7 +33,7 @@ fn test_compute_weight_different_inputs() {
 /// Build a valid, non-expired Lease for use with the fake client.
 fn make_active_lease(replica_id: &str, namespace: &str) -> Lease {
     let lease_name = format!("epa-replica-{}", replica_id);
-    let now = chrono::Utc::now();
+    let now = k8s_openapi::jiff::Timestamp::now();
 
     Lease {
         metadata: ObjectMeta {
@@ -48,6 +48,8 @@ fn make_active_lease(replica_id: &str, namespace: &str) -> Lease {
             renew_time: Some(MicroTime(now)),
             acquire_time: Some(MicroTime(now)),
             lease_transitions: None,
+            preferred_holder: None,
+            strategy: None,
         }),
     }
 }

@@ -13,6 +13,11 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+/// Get current time as a jiff Timestamp for k8s-openapi v0.27+
+fn jiff_now() -> k8s_openapi::jiff::Timestamp {
+    k8s_openapi::jiff::Timestamp::now()
+}
+
 /// Manages replica membership using Kubernetes Lease API
 ///
 /// Each replica creates a Lease with its pod IP in holderIdentity.
@@ -104,7 +109,7 @@ impl MembershipManager {
         // Store IP:port in holderIdentity for request forwarding
         let holder_identity = format!("{}:{}", self.my_pod_ip, self.webhook_port);
 
-        let now = MicroTime(chrono::Utc::now());
+        let now = MicroTime(jiff_now());
 
         let lease = Lease {
             metadata: ObjectMeta {
@@ -125,6 +130,8 @@ impl MembershipManager {
                 renew_time: Some(now.clone()),
                 acquire_time: Some(now),
                 lease_transitions: None,
+                preferred_holder: None,
+                strategy: None,
             }),
         };
 
@@ -200,7 +207,7 @@ impl MembershipManager {
             .list(&kube::api::ListParams::default().labels("app=external-pod-autoscaler"))
             .await?;
 
-        let now = chrono::Utc::now();
+        let now = jiff_now();
         let mut active = HashSet::new();
 
         for lease in leases.items {
@@ -209,7 +216,7 @@ impl MembershipManager {
                 if let (Some(renew_time), Some(duration)) =
                     (spec.renew_time, spec.lease_duration_seconds)
                 {
-                    let expires_at = renew_time.0 + chrono::Duration::seconds(duration as i64);
+                    let expires_at = renew_time.0 + std::time::Duration::from_secs(duration as u64);
 
                     if now < expires_at {
                         // Extract replica ID from lease name (epa-replica-{id})

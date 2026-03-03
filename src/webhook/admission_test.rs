@@ -109,7 +109,7 @@ async fn post_validate(
         .await?;
 
     let status = response.status().as_u16();
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await?;
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
     let review: AdmissionReview = serde_json::from_slice(&body_bytes)?;
     Ok((status, review))
 }
@@ -131,7 +131,7 @@ async fn post_mutate(
         .await?;
 
     let status = response.status().as_u16();
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await?;
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await?;
     let review: AdmissionReview = serde_json::from_slice(&body_bytes)?;
     Ok((status, review))
 }

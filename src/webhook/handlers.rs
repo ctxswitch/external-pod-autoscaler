@@ -229,7 +229,9 @@ pub async fn get_external_metric(
             metric_name: metric_name.clone(),
             metric_labels: BTreeMap::new(),
             value: format!("{}", value_i64),
-            timestamp: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(chrono::Utc::now()),
+            timestamp: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+                k8s_openapi::jiff::Timestamp::now(),
+            ),
         };
 
         telemetry
@@ -321,7 +323,9 @@ pub async fn get_external_metric(
         metric_name: metric_name.clone(),
         metric_labels: BTreeMap::new(),
         value: format!("{}", value_i64),
-        timestamp: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(chrono::Utc::now()),
+        timestamp: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+            k8s_openapi::jiff::Timestamp::now(),
+        ),
     };
 
     Ok(Json(ExternalMetricValueList::new(vec![metric_value])))

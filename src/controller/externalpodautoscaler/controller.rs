@@ -10,11 +10,11 @@ use k8s_openapi::api::autoscaling::v2::{
     MetricIdentifier, MetricSpec as HpaMetricSpec, MetricTarget,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-use kube::{api::Patch, api::PatchParams, api::PostParams, Api, Client};
-use kube_runtime::{
+use kube::runtime::{
     controller::{Action, Controller as KubeController},
     predicates, reflector, watcher, WatchStreamExt,
 };
+use kube::{api::Patch, api::PatchParams, api::PostParams, Api, Client};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, instrument, warn};
@@ -90,7 +90,7 @@ impl Controller {
             .default_backoff()
             .reflect(writer)
             .touched_objects()
-            .predicate_filter(predicates::generation);
+            .predicate_filter(predicates::generation, Default::default());
 
         let reconcile_handler = self.clone();
         let error_handler = self.clone();
@@ -148,12 +148,9 @@ impl Controller {
         }
 
         let epa_ref = observed.epa().ok_or_else(|| {
-            Error::Kube(kube::Error::Api(kube::error::ErrorResponse {
-                code: 404,
-                message: "EPA not found".to_string(),
-                reason: "NotFound".to_string(),
-                status: "Failure".to_string(),
-            }))
+            Error::Observation(anyhow::anyhow!(
+                "EPA not found after observation confirmed existence"
+            ))
         })?;
 
         // If being deleted, handle cleanup
@@ -286,7 +283,7 @@ impl Controller {
         reason: &str,
         message: &str,
     ) {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = k8s_openapi::jiff::Timestamp::now().to_string();
         let condition_status = if ready { "True" } else { "False" };
 
         // Preserve lastTransitionTime when the condition state hasn't changed.
@@ -525,6 +522,8 @@ impl Controller {
                                         .collect()
                                 }),
                                 select_policy: su.select_policy.clone(),
+                                // Not yet exposed in the EPA CRD spec (k8s 1.31 alpha feature).
+                                tolerance: None,
                             }
                         }),
                         scale_down: b.scale_down.as_ref().map(|sd| {
@@ -543,6 +542,8 @@ impl Controller {
                                         .collect()
                                 }),
                                 select_policy: sd.select_policy.clone(),
+                                // Not yet exposed in the EPA CRD spec (k8s 1.31 alpha feature).
+                                tolerance: None,
                             }
                         }),
                     }

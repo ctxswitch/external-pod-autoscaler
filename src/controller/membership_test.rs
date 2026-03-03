@@ -12,7 +12,7 @@ fn make_lease(
     name: &str,
     namespace: &str,
     holder_identity: &str,
-    renew_time: chrono::DateTime<chrono::Utc>,
+    renew_time: k8s_openapi::jiff::Timestamp,
     lease_duration_seconds: i32,
 ) -> Lease {
     Lease {
@@ -28,6 +28,8 @@ fn make_lease(
             renew_time: Some(MicroTime(renew_time)),
             acquire_time: Some(MicroTime(renew_time)),
             lease_transitions: None,
+            preferred_holder: None,
+            strategy: None,
         }),
     }
 }
@@ -109,7 +111,7 @@ async fn register_renews_existing_lease() -> Result<(), Box<dyn std::error::Erro
     let webhook_port: u16 = 8443;
 
     let lease_name = format!("epa-replica-{}", replica_id);
-    let old_time = chrono::Utc::now() - chrono::Duration::seconds(60);
+    let old_time = k8s_openapi::jiff::Timestamp::now() - std::time::Duration::from_secs(60);
 
     // Pre-seed an existing lease so the create path hits 409.
     let existing_lease = make_lease(
@@ -174,7 +176,7 @@ async fn get_replica_address_returns_holder_identity() -> Result<(), Box<dyn std
     let expected_address = "192.168.1.5:8443";
 
     let lease_name = format!("epa-replica-{}", replica_id);
-    let renew_time = chrono::Utc::now();
+    let renew_time = k8s_openapi::jiff::Timestamp::now();
 
     let lease = make_lease(&lease_name, namespace, expected_address, renew_time, 30);
 
@@ -233,7 +235,7 @@ async fn update_active_replicas_filters_expired() -> Result<(), Box<dyn std::err
     // A lease renewed recently — still valid (renew_time + 30s is in the future).
     let valid_replica_id = "replica-valid";
     let valid_lease_name = format!("epa-replica-{}", valid_replica_id);
-    let valid_renew_time = chrono::Utc::now() - chrono::Duration::seconds(5);
+    let valid_renew_time = k8s_openapi::jiff::Timestamp::now() - std::time::Duration::from_secs(5);
     let valid_lease = make_lease(
         &valid_lease_name,
         namespace,
@@ -245,7 +247,8 @@ async fn update_active_replicas_filters_expired() -> Result<(), Box<dyn std::err
     // A lease whose renew_time + duration is in the past — expired.
     let expired_replica_id = "replica-expired";
     let expired_lease_name = format!("epa-replica-{}", expired_replica_id);
-    let expired_renew_time = chrono::Utc::now() - chrono::Duration::seconds(120);
+    let expired_renew_time =
+        k8s_openapi::jiff::Timestamp::now() - std::time::Duration::from_secs(120);
     let expired_lease = make_lease(
         &expired_lease_name,
         namespace,

@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 # Kubernetes client
-kube = { version = "1.1", features = ["runtime", "derive", "client", "rustls-tls"] }
-kube-runtime = { version = "1.1", features = ["unstable-runtime-stream-control"] }
-k8s-openapi = { version = "0.25", features = ["v1_30"] }
+kube = { version = "3.0", features = ["runtime", "derive", "client", "rustls-tls"] }
+kube-runtime = { version = "3.0", features = ["unstable-runtime-stream-control"] }
+k8s-openapi = { version = "0.27", features = ["v1_33"] }
 
 # Async runtime
 tokio = { version = "1.32", features = ["full"] }
@@ -16,16 +16,16 @@ futures = "0.3"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-schemars = "0.8"
+schemars = "1"
 base64 = "0.22"
-json-patch = "2.0"
+json-patch = "4.0"
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 # Web server
-axum = "0.6"
-axum-server = { version = "0.5", features = ["tls-rustls"] }
+axum = "0.7"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 # TLS
 rustls = { version = "0.23", features = ["ring"] }
@@ -41,10 +41,9 @@ prometheus = "0.13"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Time
-chrono = "0.4"
 humantime = "2.1"
 
 # Concurrent collections
@@ -52,10 +51,10 @@ dashmap = "6.0"
 
 
 [dev-dependencies]
-kube-fake-client = "0.1"
+kube-fake-client = { version = "0.2", default-features = false, features = ["v1_33"] }
 wiremock = "0.6"
-tower = { version = "0.4", features = ["util"] }
-hyper = "0.14"
+tower = { version = "0.5", features = ["util"] }
+hyper = "1"
 http = "1"
 serial_test = "3"
 serde_yaml = "0.9"
