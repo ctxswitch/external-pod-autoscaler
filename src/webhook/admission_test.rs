@@ -4,8 +4,8 @@ use axum::body::Body;
 use hyper::Request;
 use tower::ServiceExt;
 
-use crate::controller::membership::MembershipManager;
-use crate::controller::work_assigner::WorkAssigner;
+use crate::membership::manager::MembershipManager;
+use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
 use crate::webhook::admission::{
     AdmissionRequest, AdmissionReview, GroupVersionKind, GroupVersionResource,
@@ -26,12 +26,12 @@ async fn make_test_app_state() -> Result<AppState, Box<dyn std::error::Error>> {
         "test-ns".to_string(),
         8443,
     ));
-    let work_assigner = Arc::new(WorkAssigner::new(membership.clone()));
+    let epa_ownership = Arc::new(EpaOwnership::new(membership.clone()));
     let forward_client = reqwest::Client::new();
 
     Ok(AppState {
         metrics_store: Arc::new(MetricsStore::new()),
-        work_assigner,
+        epa_ownership,
         membership,
         forward_client,
     })

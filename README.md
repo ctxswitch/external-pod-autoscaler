@@ -1,5 +1,9 @@
 # External Pod Autoscaler
 
+[![CI](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/ci.yaml/badge.svg)](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/ci.yaml)
+[![Main](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml/badge.svg)](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml)
+[![codecov](https://codecov.io/gh/ctxswitch/external-pod-autoscaler/graph/badge.svg)](https://codecov.io/gh/ctxswitch/external-pod-autoscaler)
+
 A Kubernetes controller that scrapes Prometheus metrics directly from pods and manages HPAs to scale deployments based on those metrics.
 
 ## Install

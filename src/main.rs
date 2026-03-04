@@ -1,14 +1,18 @@
 mod apis;
 mod controller;
+mod membership;
 mod scraper;
 mod store;
 mod webhook;
 
 use anyhow::{Context, Result};
-use controller::{membership::MembershipManager, work_assigner::WorkAssigner};
 use kube::Client;
+use membership::manager::MembershipManager;
+use membership::ownership::EpaOwnership;
 use std::sync::Arc;
-use tracing::info;
+use std::time::Duration;
+use tokio::signal::unix::{signal, SignalKind};
+use tracing::{info, warn};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
@@ -81,8 +85,8 @@ async fn main() -> Result<()> {
         webhook_port,
     ));
 
-    // Initialize work assigner for EPA ownership determination
-    let work_assigner = Arc::new(WorkAssigner::new(membership.clone()));
+    // Initialize EPA ownership for EPA ownership determination
+    let epa_ownership = Arc::new(EpaOwnership::new(membership.clone()));
 
     info!(
         replica_id = %membership.my_replica_id(),
@@ -92,9 +96,9 @@ async fn main() -> Result<()> {
     // Create shared metrics store
     let metrics_store = store::MetricsStore::new();
 
-    // Create scraper service with work assigner
+    // Create scraper service with EPA ownership for distributed scraping
     let scraper_service =
-        scraper::ScraperService::new(metrics_store.clone(), client.clone(), work_assigner.clone());
+        scraper::ScraperService::new(metrics_store.clone(), client.clone(), epa_ownership.clone());
     let scraper_tx = scraper_service.update_sender();
 
     // Start cache cleanup background task (runs every 60 seconds)
@@ -103,25 +107,98 @@ async fn main() -> Result<()> {
         .spawn_cache_cleanup_task(std::time::Duration::from_secs(60));
     info!("Started cache cleanup background task");
 
-    // Run all components concurrently
+    // Parse drain duration from environment (default: 120 seconds)
+    let drain_secs = match std::env::var("DRAIN_DURATION") {
+        Ok(val) => val
+            .parse::<u64>()
+            .context("DRAIN_DURATION must be a non-negative integer")?,
+        Err(std::env::VarError::NotPresent) => 120,
+        Err(std::env::VarError::NotUnicode(v)) => {
+            anyhow::bail!("DRAIN_DURATION contains invalid UTF-8: {:?}", v)
+        }
+    };
+    let drain_duration = Duration::from_secs(drain_secs);
+
+    // Register signal handlers before spawning tasks
+    let mut sigterm =
+        signal(SignalKind::terminate()).context("Failed to register SIGTERM handler")?;
+    let mut sigint =
+        signal(SignalKind::interrupt()).context("Failed to register SIGINT handler")?;
+
+    // Spawn all components as tasks so they survive into the drain sequence
+    let mut controller_handle =
+        tokio::spawn(controller::run_all(metrics_store.clone(), scraper_tx));
+    let mut scraper_handle = tokio::spawn(scraper_service.run());
+    let mut webhook_handle = tokio::spawn(run_webhook_server(
+        metrics_store,
+        epa_ownership,
+        membership.clone(),
+        webhook_port,
+    ));
+    let mut membership_handle = tokio::spawn(membership.clone().run());
+
+    // Run until a component exits, a signal arrives, or drain completes
     tokio::select! {
-        result = controller::run_all(metrics_store.clone(), scraper_tx) => {
-            result?;
+        result = &mut controller_handle => {
+            result.context("Controller task panicked")??;
             info!("Controllers stopped");
         },
-        result = scraper_service.run() => {
-            result?;
+        result = &mut scraper_handle => {
+            result.context("Scraper task panicked")??;
             info!("Scraper service stopped");
         },
-        result = run_webhook_server(metrics_store, work_assigner, membership.clone(), webhook_port) => {
-            result?;
+        result = &mut webhook_handle => {
+            result.context("Webhook task panicked")??;
             info!("Webhook server stopped");
         },
-        result = membership.run() => {
-            result?;
+        result = &mut membership_handle => {
+            result.context("Membership task panicked")??;
             info!("Membership manager stopped");
         },
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM, starting drain sequence");
+            membership.mark_draining().await;
+            info!(drain_duration_secs = drain_duration.as_secs(), "Draining...");
+            // Allow the drain to be interrupted by a second signal
+            tokio::select! {
+                _ = tokio::time::sleep(drain_duration) => {},
+                _ = sigterm.recv() => { info!("Second SIGTERM received, aborting drain"); },
+                _ = sigint.recv() => { info!("SIGINT during drain, aborting drain"); },
+            }
+            // Stop the renewal loop and wait for it to finish so it cannot
+            // re-create the lease after deletion.
+            membership_handle.abort();
+            match (&mut membership_handle).await {
+                Ok(Err(e)) => warn!(error = %e, "Membership task returned an error before abort"),
+                Err(e) if !e.is_cancelled() => warn!(error = %e, "Membership task panicked"),
+                _ => {}
+            }
+            if let Err(e) = membership.delete_lease().await {
+                warn!(error = %e, "Failed to delete lease during shutdown");
+            }
+            info!("Drain complete, shutting down");
+        },
+        _ = sigint.recv() => {
+            // SIGINT is used in development. Skip the drain sleep but still
+            // remove the lease so peers do not wait for its TTL to expire.
+            membership_handle.abort();
+            match (&mut membership_handle).await {
+                Ok(Err(e)) => warn!(error = %e, "Membership task returned an error before abort"),
+                Err(e) if !e.is_cancelled() => warn!(error = %e, "Membership task panicked"),
+                _ => {}
+            }
+            if let Err(e) = membership.delete_lease().await {
+                warn!(error = %e, "Failed to delete lease on SIGINT");
+            }
+            info!("Received SIGINT, shutting down immediately");
+        },
     }
+
+    // Abort remaining tasks so they are not detached on runtime shutdown
+    controller_handle.abort();
+    scraper_handle.abort();
+    webhook_handle.abort();
+    membership_handle.abort();
 
     Ok(())
 }
@@ -129,10 +206,10 @@ async fn main() -> Result<()> {
 /// Run the webhook server (external metrics API + admission webhooks)
 async fn run_webhook_server(
     metrics_store: store::MetricsStore,
-    work_assigner: Arc<WorkAssigner>,
+    epa_ownership: Arc<EpaOwnership>,
     membership: Arc<MembershipManager>,
     port: u16,
 ) -> Result<()> {
-    let server = webhook::WebhookServer::new(metrics_store, work_assigner, membership, port)?;
+    let server = webhook::WebhookServer::new(metrics_store, epa_ownership, membership, port)?;
     server.run().await
 }

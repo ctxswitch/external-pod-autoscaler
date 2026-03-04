@@ -1,5 +1,6 @@
 use super::{admission, handlers, telemetry};
-use crate::controller::{membership::MembershipManager, work_assigner::WorkAssigner};
+use crate::membership::manager::MembershipManager;
+use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
 use anyhow::{Context, Result};
 use axum::{routing::get, routing::post, Router};
@@ -13,7 +14,7 @@ use tracing::info;
 #[derive(Clone)]
 pub struct AppState {
     pub metrics_store: Arc<MetricsStore>,
-    pub work_assigner: Arc<WorkAssigner>,
+    pub epa_ownership: Arc<EpaOwnership>,
     pub membership: Arc<MembershipManager>,
     /// Shared HTTP client for forwarding requests to other replicas.
     /// Skips TLS verification for internal pod-to-pod communication.
@@ -45,12 +46,12 @@ impl WebhookServer {
     /// # Arguments
     ///
     /// * `metrics_store` - Shared metrics store for aggregating and serving metrics
-    /// * `work_assigner` - Work assignment coordinator for distributed scraping
+    /// * `epa_ownership` - EPA ownership coordinator for distributed scraping
     /// * `membership` - Membership manager for replica discovery
     /// * `port` - Port to listen on (typically 8443 for webhooks)
     pub fn new(
         metrics_store: MetricsStore,
-        work_assigner: Arc<WorkAssigner>,
+        epa_ownership: Arc<EpaOwnership>,
         membership: Arc<MembershipManager>,
         port: u16,
     ) -> Result<Self> {
@@ -80,7 +81,7 @@ impl WebhookServer {
         Ok(Self {
             state: AppState {
                 metrics_store: Arc::new(metrics_store),
-                work_assigner,
+                epa_ownership,
                 membership,
                 forward_client,
             },

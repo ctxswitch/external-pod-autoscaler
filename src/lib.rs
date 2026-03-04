@@ -18,6 +18,9 @@ pub mod apis;
 /// Controller for managing ExternalPodAutoscaler resources
 pub mod controller;
 
+/// Membership management for distributed replica coordination
+pub mod membership;
+
 /// Metrics scraping service for collecting data from application pods
 pub mod scraper;
 

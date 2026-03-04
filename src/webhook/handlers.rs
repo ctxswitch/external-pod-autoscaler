@@ -56,137 +56,214 @@ pub async fn get_external_metric(
         "Parsed external metric name"
     );
 
-    // Check if this replica should handle this EPA
     let epa_key = format!("{}/{}", epa_namespace, epa_name);
     if !app_state
-        .work_assigner
-        .should_handle_epa(&epa_namespace, &epa_name)
+        .epa_ownership
+        .should_serve_epa(&epa_namespace, &epa_name)
         .await
     {
-        // This replica doesn't own this EPA - forward to the owner
-        info!(
-            epa_key = %epa_key,
-            "Forwarding request to owner replica"
-        );
+        let forwarded: Option<ExternalMetricValueList> = 'forward: {
+            // Get the owner replica ID
+            let owner_id = match app_state
+                .epa_ownership
+                .get_epa_owner(&epa_namespace, &epa_name)
+                .await
+            {
+                Some(id) => id,
+                None => {
+                    // No active replicas (shouldn't happen, but be defensive)
+                    warn!(epa_key = %epa_key, "No active replicas to handle request");
+                    telemetry
+                        .api_requests
+                        .with_label_values(&[&epa_namespace, &actual_metric_name, "no_replicas"])
+                        .inc();
+                    break 'forward None;
+                }
+            };
 
-        // Get the owner replica ID
-        let owner_id = match app_state.work_assigner.get_epa_owner(&epa_key).await {
-            Some(id) => id,
-            None => {
-                // No active replicas (shouldn't happen, but be defensive)
-                warn!(epa_key = %epa_key, "No active replicas to handle request");
-                telemetry
-                    .api_requests
-                    .with_label_values(&[&epa_namespace, &actual_metric_name, "no_replicas"])
-                    .inc();
-                return Ok(Json(ExternalMetricValueList::empty()));
-            }
-        };
-
-        // Get the owner's address
-        let owner_address = match app_state.membership.get_replica_address(&owner_id).await {
-            Ok(addr) => addr,
-            Err(e) => {
-                // Owner replica is down or lease expired
-                warn!(
-                    epa_key = %epa_key,
-                    owner_id = %owner_id,
-                    error = %e,
-                    "Owner replica unavailable, returning empty metrics"
-                );
-
-                telemetry
-                    .api_requests
-                    .with_label_values(&[&epa_namespace, &actual_metric_name, "owner_down"])
-                    .inc();
-
-                return Ok(Json(ExternalMetricValueList::empty()));
-            }
-        };
-
-        // Forward the HTTP request to the owner replica
-        let forward_url = format!(
-            "https://{}/apis/external.metrics.k8s.io/v1beta1/namespaces/{}/{}",
-            owner_address, namespace, metric_name
-        );
-
-        info!(
-            epa_key = %epa_key,
-            owner_id = %owner_id,
-            forward_url = %forward_url,
-            "Forwarding to owner replica"
-        );
-
-        match app_state.forward_client.get(&forward_url).send().await {
-            Ok(response) if response.status().is_success() => {
-                // Parse the response as ExternalMetricValueList
-                match response.json::<ExternalMetricValueList>().await {
-                    Ok(metrics) => {
+            // If the hash winner is us but we can't serve yet (evaluation window
+            // not filled), forward to the previous owner (the draining replica)
+            // instead so that metrics remain available during the transition.
+            //
+            // Maximum two hops: a non-owner forwards to the active hash winner,
+            // which may itself forward once to the draining predecessor. Cycles
+            // are impossible: when we are the hash winner, we only forward if
+            // get_previous_epa_owner returns a *different* replica (the
+            // prev != owner_id guard below filters the case where no draining
+            // replica exists and the all-replica HRW winner is still us).
+            // Non-owner replicas forward to the active hash winner, never back
+            // to themselves.
+            let (forward_target, is_draining_forward) = if owner_id
+                == app_state.membership.my_replica_id()
+            {
+                match app_state
+                    .epa_ownership
+                    .get_previous_epa_owner(&epa_namespace, &epa_name)
+                    .await
+                {
+                    Some(prev) if prev != owner_id => {
                         info!(
                             epa_key = %epa_key,
-                            owner_id = %owner_id,
-                            "Successfully forwarded request"
+                            current_owner = %owner_id,
+                            previous_owner = %prev,
+                            "We are the new hash winner but not serving yet; forwarding to draining replica"
                         );
-
-                        telemetry
-                            .api_requests
-                            .with_label_values(&[&epa_namespace, &actual_metric_name, "forwarded"])
-                            .inc();
-
-                        return Ok(Json(metrics));
+                        (prev, true)
                     }
-                    Err(e) => {
+                    _ => {
                         warn!(
                             epa_key = %epa_key,
                             owner_id = %owner_id,
-                            error = %e,
-                            "Failed to parse forwarded response"
+                            "We are the hash winner but not serving yet and no draining replica available"
                         );
-
-                        telemetry
-                            .api_requests
-                            .with_label_values(&[
-                                &epa_namespace,
-                                &actual_metric_name,
-                                "forward_failed",
-                            ])
-                            .inc();
-
-                        return Ok(Json(ExternalMetricValueList::empty()));
+                        break 'forward None;
                     }
                 }
+            } else {
+                (owner_id.clone(), false)
+            };
+
+            // Get the forward target's address
+            let owner_address = match app_state
+                .membership
+                .get_replica_address(&forward_target)
+                .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    // Forward target replica is down or lease expired
+                    warn!(
+                        epa_key = %epa_key,
+                        forward_target = %forward_target,
+                        error = %e,
+                        "Forward target replica unavailable"
+                    );
+
+                    telemetry
+                        .api_requests
+                        .with_label_values(&[&epa_namespace, &actual_metric_name, "owner_down"])
+                        .inc();
+
+                    break 'forward None;
+                }
+            };
+
+            // Forward the HTTP request to the target replica
+            let forward_url = format!(
+                "https://{}/apis/external.metrics.k8s.io/v1beta1/namespaces/{}/{}",
+                owner_address, namespace, metric_name
+            );
+
+            info!(
+                epa_key = %epa_key,
+                forward_target = %forward_target,
+                forward_url = %forward_url,
+                is_draining_forward = is_draining_forward,
+                "Forwarding to {} replica",
+                if is_draining_forward { "draining" } else { "owner" }
+            );
+
+            let forward_label = if is_draining_forward {
+                "forwarded_to_draining"
+            } else {
+                "forwarded"
+            };
+
+            match app_state.forward_client.get(&forward_url).send().await {
+                Ok(response) if response.status().is_success() => {
+                    // Parse the response as ExternalMetricValueList
+                    match response.json::<ExternalMetricValueList>().await {
+                        Ok(metrics) => {
+                            info!(
+                                epa_key = %epa_key,
+                                forward_target = %forward_target,
+                                "Successfully forwarded request"
+                            );
+
+                            telemetry
+                                .api_requests
+                                .with_label_values(&[
+                                    &epa_namespace,
+                                    &actual_metric_name,
+                                    forward_label,
+                                ])
+                                .inc();
+
+                            break 'forward Some(metrics);
+                        }
+                        Err(e) => {
+                            warn!(
+                                epa_key = %epa_key,
+                                forward_target = %forward_target,
+                                error = %e,
+                                "Failed to parse forwarded response"
+                            );
+
+                            telemetry
+                                .api_requests
+                                .with_label_values(&[
+                                    &epa_namespace,
+                                    &actual_metric_name,
+                                    "forward_failed",
+                                ])
+                                .inc();
+
+                            break 'forward None;
+                        }
+                    }
+                }
+                Ok(response) => {
+                    warn!(
+                        epa_key = %epa_key,
+                        forward_target = %forward_target,
+                        status = %response.status(),
+                        "Forward request returned non-success status"
+                    );
+
+                    telemetry
+                        .api_requests
+                        .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
+                        .inc();
+
+                    break 'forward None;
+                }
+                Err(e) => {
+                    warn!(
+                        epa_key = %epa_key,
+                        forward_target = %forward_target,
+                        error = %e,
+                        "Forward request failed"
+                    );
+
+                    telemetry
+                        .api_requests
+                        .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
+                        .inc();
+
+                    break 'forward None;
+                }
             }
-            Ok(response) => {
-                warn!(
-                    epa_key = %epa_key,
-                    owner_id = %owner_id,
-                    status = %response.status(),
-                    "Forward request returned non-success status"
-                );
+        };
 
-                telemetry
-                    .api_requests
-                    .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
-                    .inc();
-
-                return Ok(Json(ExternalMetricValueList::empty()));
-            }
-            Err(e) => {
-                warn!(
-                    epa_key = %epa_key,
-                    owner_id = %owner_id,
-                    error = %e,
-                    "Forward request failed"
-                );
-
-                telemetry
-                    .api_requests
-                    .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
-                    .inc();
-
-                return Ok(Json(ExternalMetricValueList::empty()));
-            }
+        if let Some(metrics) = forwarded {
+            return Ok(Json(metrics));
         }
+
+        // Forward failed — during ownership transitions, the new owner may not
+        // be serving yet. If we have local data, fall through to local processing.
+        let windows =
+            app_state
+                .metrics_store
+                .get_windows(&epa_namespace, &epa_name, &actual_metric_name);
+        if windows.is_empty() {
+            return Ok(Json(ExternalMetricValueList::empty()));
+        }
+
+        info!(
+            epa_key = %epa_key,
+            "Forward unavailable, serving from local store during transition"
+        );
+        // Fall through to local processing
     }
 
     // This replica owns this EPA - proceed with local processing
