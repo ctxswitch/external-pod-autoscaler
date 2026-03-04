@@ -6,7 +6,6 @@ use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::{
     APIService, APIServiceSpec, ServiceReference,
 };
 use kube::{api::PostParams, Api, Client, CustomResourceExt};
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -41,16 +40,8 @@ async fn run_epa_controller(
 
     info!("Starting ExternalPodAutoscaler controller");
 
-    let context = Arc::new(externalpodautoscaler::Context::new(
-        client.clone(),
-        scraper_tx,
-    ));
-    let controller = Arc::new(externalpodautoscaler::Controller::new(
-        client,
-        metrics_store,
-    ));
-
-    controller.run(context).await?;
+    let controller = externalpodautoscaler::Controller::new(client, scraper_tx, metrics_store);
+    controller.run().await?;
 
     Ok(())
 }

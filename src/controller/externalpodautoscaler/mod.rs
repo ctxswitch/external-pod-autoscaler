@@ -9,4 +9,3 @@ mod controller_test;
 mod observer_test;
 
 pub use controller::Controller;
-pub use reconcile::{Context, Error};

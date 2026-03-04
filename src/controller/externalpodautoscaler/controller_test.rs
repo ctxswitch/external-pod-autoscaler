@@ -6,7 +6,7 @@ use kube_fake_client::ClientBuilder;
 use tokio::sync::mpsc;
 
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
-use crate::controller::externalpodautoscaler::{Context, Controller};
+use crate::controller::externalpodautoscaler::reconcile::Reconciler;
 use crate::scraper::EpaUpdate;
 use crate::store::MetricsStore;
 
@@ -29,9 +29,10 @@ async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
 
-    let context = Arc::new(Context::new(client.clone(), scraper_tx));
-    let controller = Controller::new(client.clone(), metrics_store);
-    let result = controller.reconcile(Arc::new(epa), context).await;
+    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
     assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
 
     let hpa_api = Api::<HorizontalPodAutoscaler>::namespaced(client, "production");
@@ -86,9 +87,10 @@ async fn reconcile_updates_existing_hpa() -> Result<(), Box<dyn std::error::Erro
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
 
-    let context = Arc::new(Context::new(client.clone(), scraper_tx));
-    let controller = Controller::new(client.clone(), metrics_store);
-    let result = controller.reconcile(Arc::new(epa), context).await;
+    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
     assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
 
     let hpa_api = Api::<HorizontalPodAutoscaler>::namespaced(client, "production");
@@ -122,9 +124,10 @@ async fn reconcile_sets_ready_status() -> Result<(), Box<dyn std::error::Error>>
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
 
-    let context = Arc::new(Context::new(client.clone(), scraper_tx));
-    let controller = Controller::new(client.clone(), metrics_store);
-    let result = controller.reconcile(Arc::new(epa), context).await;
+    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
     assert!(
         result.is_ok(),
         "reconcile should succeed without error: {:?}",
@@ -169,9 +172,10 @@ async fn reconcile_deletion_notifies_scraper() -> Result<(), Box<dyn std::error:
     let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
 
-    let context = Arc::new(Context::new(client.clone(), scraper_tx));
-    let controller = Controller::new(client.clone(), metrics_store);
-    let result = controller.reconcile(Arc::new(epa), context).await;
+    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
     assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
 
     // The scraper channel should have received a Delete update.
@@ -215,9 +219,10 @@ async fn reconcile_notifies_scraper_on_upsert() -> Result<(), Box<dyn std::error
     let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
 
-    let context = Arc::new(Context::new(client.clone(), scraper_tx));
-    let controller = Controller::new(client.clone(), metrics_store);
-    let result = controller.reconcile(Arc::new(epa), context).await;
+    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
     assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
 
     // The scraper channel should have received an Upsert update.
