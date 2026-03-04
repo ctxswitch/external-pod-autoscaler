@@ -1,4 +1,4 @@
-use super::{admission, handlers, telemetry};
+use super::{admission, metrics};
 use crate::membership::manager::MembershipManager;
 use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
@@ -55,8 +55,7 @@ impl WebhookServer {
         membership: Arc<MembershipManager>,
         port: u16,
     ) -> Result<Self> {
-        // Initialize telemetry
-        telemetry::Telemetry::init();
+        metrics::telemetry::Telemetry::init();
 
         // Check environment variable for webhook configuration (default: true)
         let enable_webhooks = std::env::var("ENABLE_WEBHOOKS")
@@ -143,11 +142,11 @@ pub(crate) fn build_router(state: AppState, enable_webhooks: bool) -> Router {
     let mut app = Router::new()
         .route(
             "/apis/external.metrics.k8s.io/v1beta1",
-            get(handlers::api_resource_list),
+            get(metrics::handlers::api_resource_list),
         )
         .route(
             "/apis/external.metrics.k8s.io/v1beta1/namespaces/:namespace/:metric_name",
-            get(handlers::get_external_metric),
+            get(metrics::handlers::get_external_metric),
         );
 
     if enable_webhooks {
@@ -155,11 +154,11 @@ pub(crate) fn build_router(state: AppState, enable_webhooks: bool) -> Router {
         app = app
             .route(
                 "/validate-ctx-sh-v1beta1-externalpodautoscaler",
-                post(admission::validate_epa),
+                post(admission::handlers::validate_epa),
             )
             .route(
                 "/mutate-ctx-sh-v1beta1-externalpodautoscaler",
-                post(admission::mutate_epa),
+                post(admission::handlers::mutate_epa),
             );
     } else {
         info!("Admission webhooks disabled");

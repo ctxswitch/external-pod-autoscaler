@@ -4,12 +4,10 @@ use axum::body::Body;
 use hyper::Request;
 use tower::ServiceExt;
 
+use super::handlers::{AdmissionRequest, AdmissionReview, GroupVersionKind, GroupVersionResource};
 use crate::membership::manager::MembershipManager;
 use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
-use crate::webhook::admission::{
-    AdmissionRequest, AdmissionReview, GroupVersionKind, GroupVersionResource,
-};
 use crate::webhook::server::{build_router, AppState};
 
 use kube_fake_client::ClientBuilder;
