@@ -42,15 +42,4 @@ impl MetricWindow {
             .filter(|s| now.duration_since(s.scraped_at) <= period)
             .collect()
     }
-
-    /// Returns `true` if the window contains at least `min_samples` samples whose
-    /// `scraped_at` timestamp falls within `period` of the current instant.
-    pub fn is_window_sufficient(&self, period: Duration, min_samples: usize) -> bool {
-        let now = Instant::now();
-        self.samples
-            .iter()
-            .filter(|s| now.duration_since(s.scraped_at) <= period)
-            .count()
-            >= min_samples
-    }
 }
