@@ -35,9 +35,4 @@ impl ExternalMetricValueList {
             items,
         }
     }
-
-    /// Creates an empty list with no metric values.
-    pub fn empty() -> Self {
-        Self::new(Vec::new())
-    }
 }

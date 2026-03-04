@@ -256,7 +256,10 @@ pub async fn get_external_metric(
                 .metrics_store
                 .get_windows(&epa_namespace, &epa_name, &actual_metric_name);
         if windows.is_empty() {
-            return Ok(Json(ExternalMetricValueList::empty()));
+            return Err(ApiError::MetricUnavailable(format!(
+                "metric {} unavailable during ownership transition",
+                actual_metric_name
+            )));
         }
 
         info!(
@@ -344,7 +347,10 @@ pub async fn get_external_metric(
             .with_label_values(&[&epa_namespace, &actual_metric_name, "not_found"])
             .inc();
 
-        return Ok(Json(ExternalMetricValueList::empty()));
+        return Err(ApiError::MetricUnavailable(format!(
+            "no metric data available for {}",
+            actual_metric_name
+        )));
     }
 
     // Get aggregation configuration from store (set by scraper when EPA is processed)
@@ -478,6 +484,7 @@ pub enum ApiError {
     BadRequest(String),
     #[allow(dead_code)]
     InternalError(String),
+    MetricUnavailable(String),
 }
 
 impl IntoResponse for ApiError {
@@ -487,6 +494,9 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
             ApiError::InternalError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
+            }
+            ApiError::MetricUnavailable(msg) => {
+                (StatusCode::UNPROCESSABLE_ENTITY, msg).into_response()
             }
         }
     }
