@@ -126,8 +126,11 @@ async fn main() -> Result<()> {
         signal(SignalKind::interrupt()).context("Failed to register SIGINT handler")?;
 
     // Spawn all components as tasks so they survive into the drain sequence
-    let mut controller_handle =
-        tokio::spawn(controller::run_all(metrics_store.clone(), scraper_tx));
+    let mut controller_handle = tokio::spawn(controller::run_all(
+        metrics_store.clone(),
+        scraper_tx,
+        epa_ownership.clone(),
+    ));
     let mut scraper_handle = tokio::spawn(scraper_service.run());
     let mut webhook_handle = tokio::spawn(run_webhook_server(
         metrics_store,

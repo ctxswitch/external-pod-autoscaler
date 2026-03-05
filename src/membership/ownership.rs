@@ -65,6 +65,16 @@ impl EpaOwnership {
         }
     }
 
+    /// Returns `true` if this replica is the current hash owner of the given EPA.
+    ///
+    /// # Arguments
+    /// * `namespace` - EPA namespace
+    /// * `name` - EPA name
+    pub async fn is_epa_owner(&self, namespace: &str, name: &str) -> bool {
+        let my_id = self.membership.my_replica_id();
+        self.get_epa_owner(namespace, name).await.as_deref() == Some(my_id)
+    }
+
     /// Returns the replica ID that currently owns this EPA via rendezvous hashing.
     ///
     /// All active replicas will agree on the same owner for a given `(namespace, name)` pair.

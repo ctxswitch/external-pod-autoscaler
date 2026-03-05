@@ -1,14 +1,54 @@
 use std::sync::Arc;
 
 use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
+use k8s_openapi::api::coordination::v1::Lease;
 use kube::api::Api;
 use kube_fake_client::ClientBuilder;
 use tokio::sync::mpsc;
 
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use crate::controller::externalpodautoscaler::reconcile::Reconciler;
+use crate::membership::manager::MembershipManager;
+use crate::membership::ownership::EpaOwnership;
 use crate::scraper::EpaUpdate;
 use crate::store::MetricsStore;
+
+/// Creates an `EpaOwnership` backed by a single-replica `MembershipManager`.
+///
+/// Because only one replica is registered, rendezvous hashing always elects it
+/// as the owner -- making the returned ownership suitable for tests that expect
+/// this replica to be the owner.
+async fn test_ownership(
+    client: kube::Client,
+) -> Result<Arc<EpaOwnership>, Box<dyn std::error::Error>> {
+    let membership = Arc::new(MembershipManager::new(
+        client,
+        "test-uid".to_string(),
+        "127.0.0.1".to_string(),
+        "test-pod".to_string(),
+        "default".to_string(),
+        8443,
+    ));
+    membership.register_and_renew().await?;
+    membership.update_active_replicas().await?;
+    Ok(Arc::new(EpaOwnership::new(membership)))
+}
+
+/// Creates an `EpaOwnership` where the active set is empty, so `is_epa_owner`
+/// always returns `false`. Used to test non-owner reconciliation behavior.
+fn test_ownership_not_owner(client: kube::Client) -> Arc<EpaOwnership> {
+    // No lease registration or active replica refresh -- active set stays empty,
+    // so get_epa_owner returns None and is_epa_owner returns false.
+    let membership = Arc::new(MembershipManager::new(
+        client,
+        "test-uid".to_string(),
+        "127.0.0.1".to_string(),
+        "test-pod".to_string(),
+        "default".to_string(),
+        8443,
+    ));
+    Arc::new(EpaOwnership::new(membership))
+}
 
 // New EPA with no existing HPA — HPA should be created with correct ownerRef and metrics.
 #[tokio::test]
@@ -18,6 +58,7 @@ async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
         .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
         .build()
@@ -28,8 +69,14 @@ async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
 
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership(client.clone()).await?;
 
-    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
     let result = reconciler
         .reconcile(Arc::new(epa), reconciler.clone())
         .await;
@@ -75,6 +122,7 @@ async fn reconcile_updates_existing_hpa() -> Result<(), Box<dyn std::error::Erro
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
         .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
         .load_fixture_or_panic("hpa-stale.yaml")
@@ -86,8 +134,14 @@ async fn reconcile_updates_existing_hpa() -> Result<(), Box<dyn std::error::Erro
 
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership(client.clone()).await?;
 
-    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
     let result = reconciler
         .reconcile(Arc::new(epa), reconciler.clone())
         .await;
@@ -113,6 +167,7 @@ async fn reconcile_sets_ready_status() -> Result<(), Box<dyn std::error::Error>>
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
         .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
         .build()
@@ -123,8 +178,14 @@ async fn reconcile_sets_ready_status() -> Result<(), Box<dyn std::error::Error>>
 
     let (scraper_tx, _scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership(client.clone()).await?;
 
-    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
     let result = reconciler
         .reconcile(Arc::new(epa), reconciler.clone())
         .await;
@@ -161,6 +222,7 @@ async fn reconcile_deletion_notifies_scraper() -> Result<(), Box<dyn std::error:
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
         .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-deleting.yaml")
         .build()
@@ -171,8 +233,14 @@ async fn reconcile_deletion_notifies_scraper() -> Result<(), Box<dyn std::error:
 
     let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership(client.clone()).await?;
 
-    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
     let result = reconciler
         .reconcile(Arc::new(epa), reconciler.clone())
         .await;
@@ -208,6 +276,7 @@ async fn reconcile_notifies_scraper_on_upsert() -> Result<(), Box<dyn std::error
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
         .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
         .build()
@@ -218,14 +287,124 @@ async fn reconcile_notifies_scraper_on_upsert() -> Result<(), Box<dyn std::error
 
     let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
     let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership(client.clone()).await?;
 
-    let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
     let result = reconciler
         .reconcile(Arc::new(epa), reconciler.clone())
         .await;
     assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
 
     // The scraper channel should have received an Upsert update.
+    let message = tokio::time::timeout(std::time::Duration::from_secs(1), scraper_rx.recv())
+        .await
+        .map_err(|_| "timed out waiting for scraper message")?
+        .ok_or("scraper channel was closed")?;
+
+    match &message {
+        EpaUpdate::Upsert(epa_arc) => {
+            assert_eq!(
+                epa_arc.metadata.name.as_deref(),
+                Some("queue-worker-scaler"),
+                "Upsert should contain the reconciled EPA"
+            );
+        }
+        EpaUpdate::Delete { .. } => {
+            return Err("expected EpaUpdate::Upsert, got EpaUpdate::Delete".into());
+        }
+    }
+
+    Ok(())
+}
+
+// Non-owner replica deletion — scraper should NOT receive Delete notification.
+#[tokio::test]
+async fn reconcile_deletion_works_when_not_owner() -> Result<(), Box<dyn std::error::Error>> {
+    crate::controller::externalpodautoscaler::telemetry::Telemetry::init();
+
+    let client = ClientBuilder::new()
+        .with_resource::<ExternalPodAutoscaler>()
+        .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
+        .with_fixture_dir("tests/fixtures")
+        .load_fixture_or_panic("epa-deleting.yaml")
+        .build()
+        .await?;
+
+    let epa_api = Api::<ExternalPodAutoscaler>::namespaced(client.clone(), "production");
+    let epa = epa_api.get("queue-worker-scaler").await?;
+
+    let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
+    let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership_not_owner(client.clone());
+
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
+    assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
+
+    // Non-owner should NOT send a Delete to the scraper.
+    let recv = tokio::time::timeout(std::time::Duration::from_millis(100), scraper_rx.recv()).await;
+    assert!(
+        recv.is_err(),
+        "non-owner should not send scraper messages on deletion"
+    );
+
+    Ok(())
+}
+
+// Non-owner replica — HPA should NOT be created, but scraper should still receive Upsert.
+#[tokio::test]
+async fn reconcile_skips_hpa_when_not_owner() -> Result<(), Box<dyn std::error::Error>> {
+    crate::controller::externalpodautoscaler::telemetry::Telemetry::init();
+
+    let client = ClientBuilder::new()
+        .with_resource::<ExternalPodAutoscaler>()
+        .with_resource::<HorizontalPodAutoscaler>()
+        .with_resource::<Lease>()
+        .with_fixture_dir("tests/fixtures")
+        .load_fixture_or_panic("epa-basic.yaml")
+        .build()
+        .await?;
+
+    let epa_api = Api::<ExternalPodAutoscaler>::namespaced(client.clone(), "production");
+    let epa = epa_api.get("queue-worker-scaler").await?;
+
+    let (scraper_tx, mut scraper_rx) = mpsc::channel::<EpaUpdate>(100);
+    let metrics_store = MetricsStore::new();
+    let epa_ownership = test_ownership_not_owner(client.clone());
+
+    let reconciler = Arc::new(Reconciler::new(
+        client.clone(),
+        scraper_tx,
+        metrics_store,
+        epa_ownership,
+    ));
+    let result = reconciler
+        .reconcile(Arc::new(epa), reconciler.clone())
+        .await;
+    assert!(result.is_ok(), "reconcile failed: {:?}", result.err());
+
+    // HPA should NOT have been created.
+    let hpa_api = Api::<HorizontalPodAutoscaler>::namespaced(client, "production");
+    let hpa_result = hpa_api.get("queue-worker-scaler").await;
+    assert!(
+        hpa_result.is_err(),
+        "HPA should not exist when replica is not the owner"
+    );
+
+    // Scraper should still receive Upsert even though HPA was not managed.
     let message = tokio::time::timeout(std::time::Duration::from_secs(1), scraper_rx.recv())
         .await
         .map_err(|_| "timed out waiting for scraper message")?

@@ -1,11 +1,13 @@
 use super::externalpodautoscaler;
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
+use crate::membership::ownership::EpaOwnership;
 use anyhow::Result;
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::{
     APIService, APIServiceSpec, ServiceReference,
 };
 use kube::{api::PostParams, Api, Client, CustomResourceExt};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -13,11 +15,12 @@ use tracing::{info, warn};
 pub async fn run_all(
     metrics_store: crate::store::MetricsStore,
     scraper_tx: mpsc::Sender<crate::scraper::EpaUpdate>,
+    epa_ownership: Arc<EpaOwnership>,
 ) -> Result<()> {
     info!("Starting all controllers");
 
     // Run ExternalPodAutoscaler controller
-    run_epa_controller(metrics_store, scraper_tx).await?;
+    run_epa_controller(metrics_store, scraper_tx, epa_ownership).await?;
 
     Ok(())
 }
@@ -26,6 +29,7 @@ pub async fn run_all(
 async fn run_epa_controller(
     metrics_store: crate::store::MetricsStore,
     scraper_tx: mpsc::Sender<crate::scraper::EpaUpdate>,
+    epa_ownership: Arc<EpaOwnership>,
 ) -> Result<()> {
     let client = Client::try_default().await?;
 
@@ -40,7 +44,8 @@ async fn run_epa_controller(
 
     info!("Starting ExternalPodAutoscaler controller");
 
-    let controller = externalpodautoscaler::Controller::new(client, scraper_tx, metrics_store);
+    let controller =
+        externalpodautoscaler::Controller::new(client, scraper_tx, metrics_store, epa_ownership);
     controller.run().await?;
 
     Ok(())

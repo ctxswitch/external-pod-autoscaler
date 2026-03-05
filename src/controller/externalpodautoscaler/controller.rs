@@ -1,5 +1,6 @@
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use crate::controller::externalpodautoscaler::reconcile::Reconciler;
+use crate::membership::ownership::EpaOwnership;
 use crate::scraper::EpaUpdate;
 use crate::store::MetricsStore;
 use futures::StreamExt;
@@ -26,8 +27,14 @@ impl Controller {
         client: Client,
         scraper_tx: mpsc::Sender<EpaUpdate>,
         metrics_store: MetricsStore,
+        epa_ownership: Arc<EpaOwnership>,
     ) -> Self {
-        let reconciler = Arc::new(Reconciler::new(client.clone(), scraper_tx, metrics_store));
+        let reconciler = Arc::new(Reconciler::new(
+            client.clone(),
+            scraper_tx,
+            metrics_store,
+            epa_ownership,
+        ));
         Self { client, reconciler }
     }
 

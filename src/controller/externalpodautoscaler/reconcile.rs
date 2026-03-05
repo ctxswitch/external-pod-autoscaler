@@ -1,6 +1,7 @@
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use crate::controller::externalpodautoscaler::observer::{ObservedState, StateObserver};
 use crate::controller::externalpodautoscaler::telemetry::Telemetry;
+use crate::membership::ownership::EpaOwnership;
 use crate::scraper::EpaUpdate;
 use crate::store::MetricsStore;
 use k8s_openapi::api::autoscaling::v2::{
@@ -36,6 +37,7 @@ pub struct Reconciler {
     client: kube::Client,
     scraper_tx: mpsc::Sender<EpaUpdate>,
     metrics_store: MetricsStore,
+    epa_ownership: Arc<EpaOwnership>,
 }
 
 /// Extract the name and namespace from an EPA's metadata, returning an error if either is missing.
@@ -58,11 +60,13 @@ impl Reconciler {
         client: kube::Client,
         scraper_tx: mpsc::Sender<EpaUpdate>,
         metrics_store: MetricsStore,
+        epa_ownership: Arc<EpaOwnership>,
     ) -> Self {
         Self {
             client,
             scraper_tx,
             metrics_store,
+            epa_ownership,
         }
     }
 
@@ -103,63 +107,64 @@ impl Reconciler {
             ))
         })?;
 
-        // If being deleted, handle cleanup
+        let is_owner = self.epa_ownership.is_epa_owner(&namespace, &name).await;
+
         if observed.is_deleting() {
-            info!(
-                "ExternalPodAutoscaler {}/{} is being deleted",
-                namespace, name
-            );
-
-            // Notify scraper to stop scraping this EPA
-            if let Err(e) = self
-                .scraper_tx
-                .send(EpaUpdate::Delete {
-                    namespace: namespace.clone(),
-                    name: name.clone(),
-                })
-                .await
-            {
-                warn!(
-                    epa = %name,
-                    namespace = %namespace,
-                    error = %e,
-                    "Failed to notify scraper of EPA deletion"
+            if is_owner {
+                info!(
+                    "ExternalPodAutoscaler {}/{} is being deleted",
+                    namespace, name
                 );
-            }
 
-            // Clean up metrics store
-            self.metrics_store.remove_epa_windows(&namespace, &name);
+                if let Err(e) = self
+                    .scraper_tx
+                    .send(EpaUpdate::Delete {
+                        namespace: namespace.clone(),
+                        name: name.clone(),
+                    })
+                    .await
+                {
+                    warn!(
+                        epa = %name,
+                        namespace = %namespace,
+                        error = %e,
+                        "Failed to notify scraper of EPA deletion"
+                    );
+                }
+
+                self.metrics_store.remove_epa_windows(&namespace, &name);
+            }
 
             return Ok(Action::await_change());
         }
 
-        // Ensure HPA exists and is up to date
-        let hpa_result = self.reconcile_hpa(epa_ref, &observed).await;
+        if is_owner {
+            let hpa_result = self.reconcile_hpa(epa_ref, &observed).await;
 
-        match hpa_result {
-            Ok(()) => {
-                self.patch_epa_status(
-                    &name,
-                    &namespace,
-                    true,
-                    "HpaSynced",
-                    "HPA successfully reconciled",
-                )
-                .await;
-            }
-            Err(e) => {
-                self.patch_epa_status(&name, &namespace, false, "HpaError", &e.to_string())
+            match hpa_result {
+                Ok(()) => {
+                    self.patch_epa_status(
+                        &name,
+                        &namespace,
+                        true,
+                        "HpaSynced",
+                        "HPA successfully reconciled",
+                    )
                     .await;
-                return Err(e);
+                }
+                Err(e) => {
+                    self.patch_epa_status(&name, &namespace, false, "HpaError", &e.to_string())
+                        .await;
+                    return Err(e);
+                }
             }
+        } else {
+            info!(
+                epa = %name,
+                namespace = %namespace,
+                "Skipping HPA management (not owner)"
+            );
         }
-
-        // Notify scraper service about this EPA
-        info!(
-            epa = %name,
-            namespace = %namespace,
-            "Notifying scraper service of EPA"
-        );
 
         if let Err(e) = self
             .scraper_tx
