@@ -1,7 +1,8 @@
-use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey};
+use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey, ScrapeStats};
 use super::window::MetricWindow;
 use super::MetricsStore;
 use dashmap::DashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -13,6 +14,7 @@ impl MetricsStore {
             windows: Arc::new(DashMap::new()),
             cache: Arc::new(DashMap::new()),
             configs: Arc::new(DashMap::new()),
+            scrape_stats: Arc::new(DashMap::new()),
         }
     }
 
@@ -223,6 +225,26 @@ impl MetricsStore {
         count
     }
 
+    /// Removes metric windows for pods that are no longer in the active set.
+    ///
+    /// Called after resolving the ready pod list so that terminated pods'
+    /// windows are cleaned up immediately rather than waiting for the
+    /// periodic stale-window eviction.
+    pub fn retain_pod_windows(
+        &self,
+        namespace: &str,
+        epa_name: &str,
+        active_pods: &HashSet<String>,
+    ) -> usize {
+        let before = self.windows.len();
+        self.windows.retain(|key, _| {
+            key.namespace != namespace
+                || key.epa_name != epa_name
+                || active_pods.contains(&key.pod_name)
+        });
+        before - self.windows.len()
+    }
+
     /// Removes all windows, cache entries, and configs for a specific EPA.
     ///
     /// Called when an EPA is deleted to clean up all associated metric data.
@@ -243,6 +265,17 @@ impl MetricsStore {
 
         self.configs
             .retain(|key, _| !(key.namespace == namespace && key.epa_name == epa_name));
+
+        let stats_key = format!("{}/{}", namespace, epa_name);
+        self.scrape_stats.remove(&stats_key);
+    }
+
+    pub fn get_scrape_stats(&self, namespace: &str, epa_name: &str) -> Arc<ScrapeStats> {
+        let key = format!("{}/{}", namespace, epa_name);
+        self.scrape_stats
+            .entry(key)
+            .or_insert_with(|| Arc::new(ScrapeStats::new()))
+            .clone()
     }
 
     /// Cleans up expired cache entries.
@@ -294,6 +327,7 @@ impl Clone for MetricsStore {
             windows: self.windows.clone(),
             cache: self.cache.clone(),
             configs: self.configs.clone(),
+            scrape_stats: self.scrape_stats.clone(),
         }
     }
 }

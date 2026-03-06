@@ -1,7 +1,6 @@
 use crate::apis::ctx_sh::v1beta1::AggregationType;
 use crate::store::{LabeledSample, MetricType, MetricWindow};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -11,7 +10,6 @@ use tracing::debug;
 pub async fn aggregate_metric(
     windows: &[(String, Arc<RwLock<MetricWindow>>)],
     aggregation_type: &AggregationType,
-    evaluation_period: Duration,
 ) -> (f64, usize) {
     let mut per_pod_values = Vec::new();
 
@@ -19,19 +17,16 @@ pub async fn aggregate_metric(
         // Lock window for reading
         let window = window_arc.read().await;
 
-        // Get samples within evaluation period
-        let samples = window.get_samples_in_period(evaluation_period);
-
-        if samples.is_empty() {
-            debug!(pod = %pod_name, "No samples in evaluation period");
+        if window.samples.is_empty() {
+            debug!(pod = %pod_name, "No samples in window");
             continue;
         }
 
         // Filter successful samples only
-        let successful_samples: Vec<_> = samples.iter().filter(|s| s.success).copied().collect();
+        let successful_samples: Vec<_> = window.samples.iter().filter(|s| s.success).collect();
 
         if successful_samples.is_empty() {
-            debug!(pod = %pod_name, "No successful samples in evaluation period");
+            debug!(pod = %pod_name, "No successful samples in window");
             continue;
         }
 

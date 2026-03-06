@@ -1,7 +1,7 @@
 # External Pod Autoscaler
 
 [![CI](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/ci.yaml/badge.svg)](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/ci.yaml)
-[![Main](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml/badge.svg)](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml)
+[![main](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml/badge.svg)](https://github.com/ctxswitch/external-pod-autoscaler/actions/workflows/main.yaml)
 [![codecov](https://codecov.io/gh/ctxswitch/external-pod-autoscaler/graph/badge.svg)](https://codecov.io/gh/ctxswitch/external-pod-autoscaler)
 
 A Kubernetes controller that scrapes Prometheus metrics directly from pods and manages HPAs to scale deployments based on those metrics.
@@ -79,10 +79,8 @@ Durations accept humantime strings: `15s`, `1m`, `5m`, `1h`.
 Requires [k3d](https://k3d.io/).
 
 ```bash
-make localdev          # Create cluster + deploy controller
-make logs              # Tail controller logs
-make localdev-clean    # Delete cluster
-make localdev-restart  # Delete + recreate
+make localdev
+make run
 ```
 
 ## Building

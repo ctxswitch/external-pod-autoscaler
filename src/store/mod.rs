@@ -7,7 +7,9 @@ mod ops_test;
 #[cfg(test)]
 mod window_test;
 
-pub use types::{CacheKey, CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey};
+pub use types::{
+    CacheKey, CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey, ScrapeStats,
+};
 pub use window::MetricWindow;
 
 use dashmap::DashMap;
@@ -19,7 +21,7 @@ use tokio::sync::RwLock;
 /// Thread-safe storage for time-windowed metric samples. Supports:
 /// - Per-pod sliding windows of samples
 /// - Cached aggregation results with TTL
-/// - Metric configuration (aggregation type and evaluation period)
+/// - Metric configuration (aggregation type)
 /// - Cleanup on EPA deletion
 ///
 /// # Storage Strategy
@@ -35,4 +37,5 @@ pub struct MetricsStore {
     windows: Arc<DashMap<SampleKey, Arc<RwLock<MetricWindow>>>>,
     cache: Arc<DashMap<CacheKey, CachedAggregation>>,
     configs: Arc<DashMap<CacheKey, MetricConfig>>,
+    scrape_stats: Arc<DashMap<String, Arc<ScrapeStats>>>,
 }

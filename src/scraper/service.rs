@@ -215,38 +215,13 @@ impl ScraperService {
                     // Pre-populate metric configs so the webhook handler can
                     // respond before the first scheduler tick. The scheduler
                     // also writes configs each tick to pick up spec changes.
-                    let evaluation_period = match super::worker::parse_duration(
-                        &epa.spec.scrape.evaluation_period,
-                    ) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            warn!(epa = %key, error = %e, "Invalid evaluation_period; skipping metric config registration");
-                            // Still register the EPA; the scheduler will
-                            // re-register configs on the first tick.
-                            let mut epas = active_epas.write().await;
-                            epas.insert(key, epa);
-                            continue;
-                        }
-                    };
-
                     for metric_spec in &epa.spec.metrics {
                         let agg_type = metric_spec
                             .aggregation_type
                             .as_ref()
                             .unwrap_or(&epa.spec.scrape.aggregation_type)
                             .clone();
-                        let eval_period = if let Some(period_str) = &metric_spec.evaluation_period {
-                            match super::worker::parse_duration(period_str) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    warn!(epa = %key, error = %e, "Invalid metric evaluation_period");
-                                    continue;
-                                }
-                            }
-                        } else {
-                            evaluation_period
-                        };
-                        let config = crate::store::MetricConfig::new(agg_type, eval_period);
+                        let config = crate::store::MetricConfig::new(agg_type);
                         metrics_store.set_metric_config(
                             namespace,
                             name,

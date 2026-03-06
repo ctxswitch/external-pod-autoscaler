@@ -1,6 +1,7 @@
 use super::types::{CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey};
 use super::MetricsStore;
 use crate::apis::ctx_sh::v1beta1::AggregationType;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -148,7 +149,7 @@ async fn store_remove_epa_windows() {
         "default",
         "epa-1",
         "metric_a",
-        MetricConfig::new(AggregationType::Max, Duration::from_secs(120)),
+        MetricConfig::new(AggregationType::Max),
     );
 
     // Remove EPA 1
@@ -167,7 +168,7 @@ async fn store_remove_epa_windows() {
 async fn store_metric_config_roundtrip() {
     let store = MetricsStore::new();
 
-    let config = MetricConfig::new(AggregationType::Median, Duration::from_secs(300));
+    let config = MetricConfig::new(AggregationType::Median);
     store.set_metric_config("prod", "scaler", "queue_depth", config);
 
     let retrieved = store.get_metric_config("prod", "scaler", "queue_depth");
@@ -175,7 +176,6 @@ async fn store_metric_config_roundtrip() {
         matches!(retrieved.aggregation_type, AggregationType::Median),
         "aggregation type should be Median"
     );
-    assert_eq!(retrieved.evaluation_period, Duration::from_secs(300));
 
     // Non-existent config should return defaults
     let default_config = store.get_metric_config("prod", "scaler", "nonexistent");
@@ -183,7 +183,6 @@ async fn store_metric_config_roundtrip() {
         default_config.aggregation_type,
         AggregationType::Avg
     ));
-    assert_eq!(default_config.evaluation_period, Duration::from_secs(60));
 }
 
 // Cache with short TTL, sleep, cleanup removes expired entries.
@@ -233,51 +232,109 @@ async fn store_cleanup_expired_cache() {
         .is_some());
 }
 
-// Push samples at different times, get_samples_in_period filters correctly.
-#[tokio::test]
-async fn window_get_samples_in_period() {
+#[test]
+fn scrape_stats_record_and_snapshot() {
     let store = MetricsStore::new();
-    let key = SampleKey::new(
+    let stats = store.get_scrape_stats("default", "test-epa");
+
+    stats.record_success();
+    stats.record_success();
+    stats.record_error();
+
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 2);
+    assert_eq!(errors, 1);
+}
+
+#[test]
+fn scrape_stats_snapshot_and_reset_zeroes() {
+    let store = MetricsStore::new();
+    let stats = store.get_scrape_stats("default", "test-epa");
+
+    stats.record_success();
+    stats.record_error();
+
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 1);
+    assert_eq!(errors, 1);
+
+    // Second call should return zeros
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 0);
+    assert_eq!(errors, 0);
+}
+
+#[test]
+fn scrape_stats_shared_instance() {
+    let store = MetricsStore::new();
+    let stats1 = store.get_scrape_stats("default", "test-epa");
+    let stats2 = store.get_scrape_stats("default", "test-epa");
+
+    stats1.record_success();
+    let (scraped, _) = stats2.snapshot_and_reset();
+    assert_eq!(scraped, 1, "both Arcs should point to the same instance");
+}
+
+#[tokio::test]
+async fn remove_epa_cleans_scrape_stats() {
+    let store = MetricsStore::new();
+    let stats = store.get_scrape_stats("default", "epa-1");
+    stats.record_success();
+
+    store.remove_epa_windows("default", "epa-1");
+
+    // After removal, get_scrape_stats should return a fresh instance
+    let fresh = store.get_scrape_stats("default", "epa-1");
+    let (scraped, errors) = fresh.snapshot_and_reset();
+    assert_eq!(scraped, 0);
+    assert_eq!(errors, 0);
+}
+
+#[tokio::test]
+async fn retain_pod_windows_removes_terminated_pods() {
+    let store = MetricsStore::new();
+
+    let sample = || LabeledSample {
+        value: 1.0,
+        scraped_at: Instant::now(),
+        success: true,
+        metric_type: MetricType::Gauge,
+    };
+
+    // Create windows for 3 pods under the same EPA
+    for pod in &["pod-1", "pod-2", "pod-3"] {
+        let key = SampleKey::new(
+            "default".to_string(),
+            "test-epa".to_string(),
+            "cpu".to_string(),
+            pod.to_string(),
+        );
+        store.push_sample(key, sample(), 10).await;
+    }
+
+    // Create a window for a different EPA to verify it's untouched
+    let other_key = SampleKey::new(
         "default".to_string(),
-        "test-epa".to_string(),
-        "metric_x".to_string(),
-        "pod-1".to_string(),
+        "other-epa".to_string(),
+        "cpu".to_string(),
+        "pod-2".to_string(),
     );
+    store.push_sample(other_key, sample(), 10).await;
 
-    // Push an old sample (120s ago)
-    let old_sample = LabeledSample {
-        value: 999.0,
-        scraped_at: Instant::now() - Duration::from_secs(120),
-        success: true,
-        metric_type: MetricType::Gauge,
-    };
-    store.push_sample(key.clone(), old_sample, 100).await;
+    // Only pod-1 and pod-3 are active
+    let active: HashSet<String> = ["pod-1", "pod-3"].iter().map(|s| s.to_string()).collect();
+    let removed = store.retain_pod_windows("default", "test-epa", &active);
 
-    // Push a recent sample (5s ago)
-    let recent_sample = LabeledSample {
-        value: 42.0,
-        scraped_at: Instant::now() - Duration::from_secs(5),
-        success: true,
-        metric_type: MetricType::Gauge,
-    };
-    store.push_sample(key, recent_sample, 100).await;
+    assert_eq!(removed, 1, "pod-2 window should have been removed");
 
-    let windows = store.get_windows("default", "test-epa", "metric_x");
-    assert_eq!(windows.len(), 1);
+    // pod-1 and pod-3 should still exist
+    let windows = store.get_windows("default", "test-epa", "cpu");
+    assert_eq!(windows.len(), 2);
+    let names: Vec<&str> = windows.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(names.contains(&"pod-1"));
+    assert!(names.contains(&"pod-3"));
 
-    let window = windows[0].1.read().await;
-    assert_eq!(
-        window.samples.len(),
-        2,
-        "window should have 2 total samples"
-    );
-
-    // Filter for last 60s
-    let in_period = window.get_samples_in_period(Duration::from_secs(60));
-    assert_eq!(
-        in_period.len(),
-        1,
-        "only 1 sample should be within 60s period"
-    );
-    assert_eq!(in_period[0].value, 42.0);
+    // other-epa's pod-2 should be untouched
+    let other_windows = store.get_windows("default", "other-epa", "cpu");
+    assert_eq!(other_windows.len(), 1);
 }

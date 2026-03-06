@@ -15,7 +15,8 @@ use std::collections::BTreeMap;
     printcolumn = r#"{"name":"Scale Target", "type":"string", "jsonPath":".spec.scaleTargetRef.name"}"#,
     printcolumn = r#"{"name":"Min", "type":"integer", "jsonPath":".spec.minReplicas"}"#,
     printcolumn = r#"{"name":"Max", "type":"integer", "jsonPath":".spec.maxReplicas"}"#,
-    printcolumn = r#"{"name":"Replicas", "type":"integer", "jsonPath":".status.currentReplicas"}"#,
+    printcolumn = r#"{"name":"Scraped", "type":"integer", "jsonPath":".status.scrapedReplicas"}"#,
+    printcolumn = r#"{"name":"Errors", "type":"integer", "jsonPath":".status.scrapeErrors"}"#,
     printcolumn = r#"{"name":"Age", "type":"date", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -246,17 +247,13 @@ pub struct ExternalPodAutoscalerStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_hpa: Option<ManagedHpaStatus>,
 
-    /// Scrape status
+    /// Scraped replica count
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scrape: Option<ScrapeStatus>,
+    pub scraped_replicas: Option<i32>,
 
-    /// Current replica count
+    /// Scrape error count
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_replicas: Option<i32>,
-
-    /// Desired replica count
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub desired_replicas: Option<i32>,
+    pub scrape_errors: Option<i32>,
 
     /// Conditions
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -273,49 +270,6 @@ pub struct ManagedHpaStatus {
     /// Last sync time
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_time: Option<String>,
-}
-
-/// Scrape status
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ScrapeStatus {
-    /// Total number of scrape targets
-    #[serde(default)]
-    pub total_targets: i32,
-
-    /// Number of healthy targets
-    #[serde(default)]
-    pub healthy_targets: i32,
-
-    /// Last successful scrape time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_scrape_time: Option<String>,
-
-    /// Endpoints being scraped
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub endpoints: Vec<ScrapeEndpoint>,
-}
-
-/// Scrape endpoint
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ScrapeEndpoint {
-    /// Pod name
-    pub pod_name: String,
-
-    /// Pod IP
-    pub pod_ip: String,
-
-    /// Target URL
-    pub target_url: String,
-
-    /// Ready status
-    #[serde(default)]
-    pub ready: bool,
-
-    /// Last scrape status
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_status: Option<String>,
 }
 
 /// Condition
