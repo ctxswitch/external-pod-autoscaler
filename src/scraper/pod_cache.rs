@@ -194,6 +194,7 @@ impl PodCache {
     /// - Phase is `Running`
     /// - It has a pod IP
     /// - Its `Ready` condition is `True`
+    /// - `deletionTimestamp` is not set (pod is not terminating)
     ///
     /// On the first call for a namespace, the reflector is lazily started and
     /// its initial list is awaited so that the returned set is immediately
@@ -256,9 +257,15 @@ pub(crate) fn parse_label_selector(selector: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Returns `true` when the pod is in the `Running` phase, has a pod IP, and
-/// its `Ready` condition is `True`.
+/// Returns `true` when the pod is in the `Running` phase, has a pod IP,
+/// its `Ready` condition is `True`, and `deletionTimestamp` is not set
+/// (i.e., the pod is not terminating).
 pub(crate) fn is_pod_ready(pod: &Pod) -> bool {
+    // Exclude terminating pods (deletionTimestamp is set)
+    if pod.metadata.deletion_timestamp.is_some() {
+        return false;
+    }
+
     let status = match pod.status.as_ref() {
         Some(s) => s,
         None => return false,

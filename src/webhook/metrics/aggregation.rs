@@ -12,7 +12,7 @@ pub async fn aggregate_metric(
     windows: &[(String, Arc<RwLock<MetricWindow>>)],
     aggregation_type: &AggregationType,
     evaluation_period: Duration,
-) -> f64 {
+) -> (f64, usize) {
     let mut per_pod_values = Vec::new();
 
     for (pod_name, window_arc) in windows {
@@ -69,7 +69,7 @@ pub async fn aggregate_metric(
         "Computed cross-pod sum"
     );
 
-    total
+    (total, per_pod_values.len())
 }
 
 /// Calculate rate for counter metrics

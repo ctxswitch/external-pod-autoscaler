@@ -6,6 +6,9 @@ KUBECTL ?= kubectl
 KUSTOMIZE ?= kustomize
 CARGO ?= cargo
 
+DUMMY_METRICS_IMAGE ?= ctxsh/dummy-metrics
+DUMMY_METRICS_TAG ?= v0.0.2
+
 ###
 ### Build targets
 ###
@@ -31,10 +34,22 @@ fmt-check:
 
 
 ###
+### Docker targets
+###
+.PHONY: dummy-metrics
+dummy-metrics:
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-t $(DUMMY_METRICS_IMAGE):$(DUMMY_METRICS_TAG) \
+		-t $(DUMMY_METRICS_IMAGE):latest \
+		--push \
+		examples/dummy-metrics
+
+###
 ### Local development
 ###
 .PHONY: localdev
-localdev: localdev-cluster localdev-cert-manager localdev-install
+localdev: localdev-cluster localdev-install
 
 .PHONY: localdev-cluster
 localdev-cluster:
@@ -52,7 +67,7 @@ localdev-cert-manager:
 	@$(KUBECTL) wait --for=condition=available --timeout=120s deploy -l app.kubernetes.io/instance=cert-manager -n cert-manager
 
 .PHONY: localdev-install
-localdev-install:
+localdev-install: localdev-cert-manager
 	@echo "Installing EPA controller..."
 	@$(KUSTOMIZE) build config/epa/overlays/$(ENV) | $(KUBECTL) apply -f -
 	@echo "Waiting for EPA controller to be ready..."
@@ -122,6 +137,9 @@ help:
 	@echo "  clippy             - Run clippy linter"
 	@echo "  fmt                - Format code"
 	@echo "  fmt-check          - Check code formatting"
+	@echo ""
+	@echo "Docker targets:"
+	@echo "  dummy-metrics - Build and push multi-arch dummy-metrics image"
 	@echo ""
 	@echo "Local development:"
 	@echo "  localdev           - Create k3d cluster + install controller"

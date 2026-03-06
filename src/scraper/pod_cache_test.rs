@@ -90,6 +90,15 @@ fn is_pod_ready_condition_false() {
 }
 
 #[test]
+fn is_pod_ready_terminating() {
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+    let mut pod = make_pod(Some("Running"), Some("10.0.0.1"), Some("True"), None);
+    Arc::make_mut(&mut pod).metadata.deletion_timestamp =
+        Some(Time(k8s_openapi::jiff::Timestamp::now()));
+    assert!(!is_pod_ready(&pod));
+}
+
+#[test]
 fn pod_matches_selector_all_labels_present() {
     let pod = make_pod(
         Some("Running"),

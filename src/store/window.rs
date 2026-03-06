@@ -32,6 +32,13 @@ impl MetricWindow {
         self.samples.push_back(sample);
     }
 
+    /// Returns the age of the most recent sample, or `None` if the window is empty.
+    ///
+    /// Age is computed as the elapsed time since the newest sample's `scraped_at`.
+    pub fn newest_sample_age(&self) -> Option<Duration> {
+        self.samples.back().map(|s| s.scraped_at.elapsed())
+    }
+
     /// Returns samples within the specified evaluation period from now.
     ///
     /// Filters out samples older than `period` based on their `scraped_at` timestamp.

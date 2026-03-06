@@ -13,6 +13,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+const FIELD_MANAGER: &str = "external-pod-autoscaler";
+
 /// Get current time as a jiff Timestamp for k8s-openapi v0.27+
 fn jiff_now() -> k8s_openapi::jiff::Timestamp {
     k8s_openapi::jiff::Timestamp::now()
@@ -167,7 +169,11 @@ impl MembershipManager {
         };
 
         // Try to create, if exists then update
-        match lease_api.create(&PostParams::default(), &lease).await {
+        let create_params = PostParams {
+            field_manager: Some(FIELD_MANAGER.to_string()),
+            ..Default::default()
+        };
+        match lease_api.create(&create_params, &lease).await {
             Ok(_) => {
                 info!(
                     replica_id = %self.my_replica_id,
@@ -180,7 +186,7 @@ impl MembershipManager {
                 lease_api
                     .patch(
                         &lease_name,
-                        &PatchParams::apply("external-pod-autoscaler"),
+                        &PatchParams::apply(FIELD_MANAGER).force(),
                         &Patch::Apply(&lease),
                     )
                     .await?;

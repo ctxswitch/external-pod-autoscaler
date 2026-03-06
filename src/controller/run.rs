@@ -100,14 +100,23 @@ pub(crate) async fn register_api_service(client: &Client) -> Result<()> {
 
     info!("Registering APIService: {}", api_service_name);
 
-    // Get service namespace and name from environment or use defaults
     let service_namespace =
         std::env::var("SERVICE_NAMESPACE").unwrap_or_else(|_| "epa-system".to_string());
     let service_name = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "epa-webhook".to_string());
 
+    // cert-manager CA injector copies the CA from the named Certificate into
+    // the APIService's spec.caBundle, letting the aggregation layer verify
+    // our self-signed TLS certificate.
+    let cert_name = std::env::var("CERT_NAME").unwrap_or_else(|_| "epa-webhook-cert".to_string());
+    let inject_annotation = format!("{}/{}", service_namespace, cert_name);
+
     let api_service = APIService {
         metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
             name: Some(api_service_name.to_string()),
+            annotations: Some(std::collections::BTreeMap::from([(
+                "cert-manager.io/inject-ca-from".to_string(),
+                inject_annotation,
+            )])),
             ..Default::default()
         },
         spec: Some(APIServiceSpec {
@@ -121,18 +130,21 @@ pub(crate) async fn register_api_service(client: &Client) -> Result<()> {
             insecure_skip_tls_verify: Some(false),
             group_priority_minimum: 100,
             version_priority: 100,
-            ca_bundle: None, // Will be injected by cert-manager
+            ca_bundle: None,
         }),
         status: None,
     };
 
     match api_service_api.get(api_service_name).await {
         Ok(existing) => {
-            // APIService exists, update it
             info!("APIService already exists, updating: {}", api_service_name);
 
             let mut updated = api_service;
             updated.metadata.resource_version = existing.metadata.resource_version;
+            // Preserve the caBundle that cert-manager may have already injected
+            if let Some(ref mut spec) = updated.spec {
+                spec.ca_bundle = existing.spec.as_ref().and_then(|s| s.ca_bundle.clone());
+            }
 
             match api_service_api
                 .replace(api_service_name, &PostParams::default(), &updated)
@@ -144,13 +156,18 @@ pub(crate) async fn register_api_service(client: &Client) -> Result<()> {
                 }
             }
         }
-        Err(_) => {
-            // APIService doesn't exist, create it
+        Err(kube::Error::Api(ae)) if ae.code == 404 => {
             info!("APIService does not exist, creating: {}", api_service_name);
             api_service_api
                 .create(&PostParams::default(), &api_service)
                 .await?;
             info!("Successfully created APIService: {}", api_service_name);
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Failed to check APIService existence: {}",
+                e
+            ));
         }
     }
 

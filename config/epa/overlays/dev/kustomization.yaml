@@ -5,6 +5,7 @@ commonAnnotations:
   ctx.sh/license: "Apache"
 resources:
   - ../../base
+  - dummy-metrics.yaml
 patches:
   - path: deployment.yaml
     target:

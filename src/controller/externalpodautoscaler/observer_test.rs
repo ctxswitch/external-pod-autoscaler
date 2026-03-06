@@ -1,20 +1,17 @@
 use std::time::SystemTime;
 
-use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use kube_fake_client::ClientBuilder;
 
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use crate::controller::externalpodautoscaler::observer::{ObservedState, StateObserver};
 
-// Both EPA and HPA exist — ObservedState should have both fields populated.
+// EPA exists — ObservedState should have the epa field populated.
 #[tokio::test]
-async fn observe_existing_epa_and_hpa() -> Result<(), Box<dyn std::error::Error>> {
+async fn observe_existing_epa() -> Result<(), Box<dyn std::error::Error>> {
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
-        .with_resource::<HorizontalPodAutoscaler>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
-        .load_fixture_or_panic("hpa-basic.yaml")
         .build()
         .await?;
 
@@ -26,7 +23,6 @@ async fn observe_existing_epa_and_hpa() -> Result<(), Box<dyn std::error::Error>
 
     let mut observed = ObservedState {
         epa: None,
-        hpa: None,
         observe_time: SystemTime::UNIX_EPOCH,
     };
 
@@ -35,10 +31,6 @@ async fn observe_existing_epa_and_hpa() -> Result<(), Box<dyn std::error::Error>
     assert!(
         observed.epa_exists(),
         "epa should be populated when the resource exists"
-    );
-    assert!(
-        observed.hpa_exists(),
-        "hpa should be populated when both exist and the epa is not being deleted"
     );
 
     let observed_epa = observed
@@ -56,21 +48,6 @@ async fn observe_existing_epa_and_hpa() -> Result<(), Box<dyn std::error::Error>
         "epa namespace should match"
     );
 
-    let observed_hpa = observed
-        .hpa
-        .as_ref()
-        .ok_or("expected hpa to be Some after observe")?;
-    assert_eq!(
-        observed_hpa.metadata.name.as_deref(),
-        Some("queue-worker-scaler"),
-        "hpa name should match"
-    );
-    assert_eq!(
-        observed_hpa.metadata.namespace.as_deref(),
-        Some("production"),
-        "hpa namespace should match"
-    );
-
     assert_ne!(
         observed.observe_time,
         SystemTime::UNIX_EPOCH,
@@ -80,12 +57,11 @@ async fn observe_existing_epa_and_hpa() -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-// EPA exists but no HPA — epa should be Some, hpa should be None.
+// EPA exists but uses a different fixture — epa should be Some.
 #[tokio::test]
-async fn observe_epa_without_hpa() -> Result<(), Box<dyn std::error::Error>> {
+async fn observe_epa_self_scaling() -> Result<(), Box<dyn std::error::Error>> {
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
-        .with_resource::<HorizontalPodAutoscaler>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-self-scaling.yaml")
         .build()
@@ -95,7 +71,6 @@ async fn observe_epa_without_hpa() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut observed = ObservedState {
         epa: None,
-        hpa: None,
         observe_time: SystemTime::UNIX_EPOCH,
     };
 
@@ -104,10 +79,6 @@ async fn observe_epa_without_hpa() -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         observed.epa_exists(),
         "epa should be populated when the resource exists"
-    );
-    assert!(
-        !observed.hpa_exists(),
-        "hpa should be None when no HPA exists for the given name"
     );
 
     let observed_epa = observed
@@ -129,12 +100,11 @@ async fn observe_epa_without_hpa() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// Neither EPA nor HPA exist — both fields should be None and no error should be returned.
+// EPA does not exist — epa should be None and no error should be returned.
 #[tokio::test]
 async fn observe_missing_epa() -> Result<(), Box<dyn std::error::Error>> {
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
-        .with_resource::<HorizontalPodAutoscaler>()
         .build()
         .await?;
 
@@ -147,7 +117,6 @@ async fn observe_missing_epa() -> Result<(), Box<dyn std::error::Error>> {
     let initial_time = SystemTime::UNIX_EPOCH;
     let mut observed = ObservedState {
         epa: None,
-        hpa: None,
         observe_time: initial_time,
     };
 
@@ -156,10 +125,6 @@ async fn observe_missing_epa() -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         !observed.epa_exists(),
         "epa should be None when the resource does not exist"
-    );
-    assert!(
-        !observed.hpa_exists(),
-        "hpa should be None when the epa does not exist (observe returns early)"
     );
 
     assert_eq!(
@@ -170,15 +135,13 @@ async fn observe_missing_epa() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// EPA has a deletionTimestamp — HPA lookup should be skipped even if an HPA exists.
+// EPA has a deletionTimestamp — is_deleting() should return true.
 #[tokio::test]
-async fn observe_deleting_epa_skips_hpa() -> Result<(), Box<dyn std::error::Error>> {
+async fn observe_deleting_epa() -> Result<(), Box<dyn std::error::Error>> {
     let client = ClientBuilder::new()
         .with_resource::<ExternalPodAutoscaler>()
-        .with_resource::<HorizontalPodAutoscaler>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-deleting.yaml")
-        .load_fixture_or_panic("hpa-basic.yaml")
         .build()
         .await?;
 
@@ -190,7 +153,6 @@ async fn observe_deleting_epa_skips_hpa() -> Result<(), Box<dyn std::error::Erro
 
     let mut observed = ObservedState {
         epa: None,
-        hpa: None,
         observe_time: SystemTime::UNIX_EPOCH,
     };
 
@@ -213,11 +175,6 @@ async fn observe_deleting_epa_skips_hpa() -> Result<(), Box<dyn std::error::Erro
     assert!(
         observed.is_deleting(),
         "is_deleting() should return true when deletionTimestamp is set"
-    );
-
-    assert!(
-        !observed.hpa_exists(),
-        "hpa should not be fetched when the epa has a deletionTimestamp set"
     );
 
     Ok(())

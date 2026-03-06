@@ -132,8 +132,10 @@ async fn aggregate_metric_single_pod_gauge() {
     let window = make_window(samples, 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
     assert_eq!(result, 20.0, "single pod avg of [10,20,30] should be 20");
+    assert_eq!(pod_count, 1);
 }
 
 // Three pods — cross-pod sum of per-pod averages.
@@ -161,10 +163,12 @@ async fn aggregate_metric_multi_pod_sum() {
         ("pod-3".to_string(), w3),
     ];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
     // pod-1: avg(10,20)=15, pod-2: avg(30,40)=35, pod-3: avg(50)=50
     // cross-pod sum: 15+35+50 = 100
     assert_eq!(result, 100.0);
+    assert_eq!(pod_count, 3);
 }
 
 // Mix of success=true/false — only successful samples should be aggregated.
@@ -178,17 +182,21 @@ async fn aggregate_metric_filters_failed_samples() {
     let window = make_window(samples, 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
     // Only successful: avg(10, 30) = 20
     assert_eq!(result, 20.0);
+    assert_eq!(pod_count, 1);
 }
 
 // No windows — should return 0.
 #[tokio::test]
 async fn aggregate_metric_empty_windows_returns_zero() {
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![];
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
     assert_eq!(result, 0.0);
+    assert_eq!(pod_count, 0);
 }
 
 // Counter rate: two samples at different times, verify rate calculation.
@@ -212,7 +220,9 @@ async fn aggregate_metric_counter_rate() {
     let window = make_window(samples, 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    assert_eq!(pod_count, 1);
     // rate = (200 - 100) / 10s = 10.0/s
     assert!(
         (result - 10.0).abs() < 0.1,
@@ -242,7 +252,9 @@ async fn aggregate_metric_counter_reset() {
     let window = make_window(samples, 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    assert_eq!(pod_count, 1);
     // Counter reset: rate = last.value / time_diff = 50 / 10 = 5.0
     assert!(
         (result - 5.0).abs() < 0.1,
@@ -258,7 +270,9 @@ async fn aggregate_metric_single_counter_sample() {
     let window = make_window(samples, 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    assert_eq!(pod_count, 1);
     // Single sample: returns value capped at MAX_RATE
     assert_eq!(result, 42.0);
 }
@@ -273,7 +287,31 @@ async fn aggregate_metric_evaluation_period_filters() {
     let window = make_window(vec![old_sample, recent_sample], 10);
     let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> = vec![("pod-1".to_string(), window)];
 
-    let result = aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
     // Only the recent sample (10.0) should be included
     assert_eq!(result, 10.0);
+    assert_eq!(pod_count, 1);
+}
+
+// Two pods but only one has samples in the evaluation period — contributing
+// pod count should be 1, not 2 (the whole point of this change).
+#[tokio::test]
+async fn aggregate_metric_stale_pod_excluded_from_count() {
+    let recent_sample = create_sample(10.0, MetricType::Gauge);
+    let old_sample = create_sample_at(999.0, MetricType::Gauge, Duration::from_secs(120));
+
+    let w1 = make_window(vec![recent_sample], 10);
+    let w2 = make_window(vec![old_sample], 10);
+
+    let windows: Vec<(String, Arc<RwLock<MetricWindow>>)> =
+        vec![("pod-1".to_string(), w1), ("pod-2".to_string(), w2)];
+
+    let (result, pod_count) =
+        aggregate_metric(&windows, &AggregationType::Avg, Duration::from_secs(60)).await;
+    assert_eq!(result, 10.0);
+    assert_eq!(
+        pod_count, 1,
+        "only pod-1 has samples in the evaluation period"
+    );
 }
