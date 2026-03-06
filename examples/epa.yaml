@@ -1,0 +1,27 @@
+apiVersion: ctx.sh/v1beta1
+kind: ExternalPodAutoscaler
+metadata:
+  name: dummy-metrics-scaler
+  namespace: epa-system
+spec:
+  minReplicas: 1
+  maxReplicas: 10
+  scrape:
+    port: 9090
+    path: /metrics
+    interval: 10s
+    timeout: 2s
+    scheme: http
+    evaluationPeriod: 10s
+    aggregationType: avg
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dummy-metrics
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 0
+  metrics:
+    - metricName: queue_depth
+      type: AverageValue
+      targetValue: "10"

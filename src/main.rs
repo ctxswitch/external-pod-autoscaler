@@ -85,7 +85,18 @@ async fn main() -> Result<()> {
         webhook_port,
     ));
 
-    // Initialize EPA ownership for EPA ownership determination
+    // Register lease and discover peers before starting the controller.
+    // This ensures is_epa_owner() has a populated active set when the
+    // initial informer sync triggers reconciliation.
+    membership
+        .register_and_renew()
+        .await
+        .context("Failed to register initial membership lease")?;
+    membership
+        .update_active_replicas()
+        .await
+        .context("Failed to populate initial active replicas")?;
+
     let epa_ownership = Arc::new(EpaOwnership::new(membership.clone()));
 
     info!(

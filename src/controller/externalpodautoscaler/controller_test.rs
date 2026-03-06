@@ -50,9 +50,9 @@ fn test_ownership_not_owner(client: kube::Client) -> Arc<EpaOwnership> {
     Arc::new(EpaOwnership::new(membership))
 }
 
-// New EPA with no existing HPA — HPA should be created with correct ownerRef and metrics.
+// EPA reconcile — HPA should be applied via SSA with correct ownerRef and metrics.
 #[tokio::test]
-async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
+async fn reconcile_applies_hpa() -> Result<(), Box<dyn std::error::Error>> {
     crate::controller::externalpodautoscaler::telemetry::Telemetry::init();
 
     let client = ClientBuilder::new()
@@ -61,6 +61,7 @@ async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
+        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 
@@ -114,7 +115,7 @@ async fn reconcile_creates_hpa() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// EPA changed — existing HPA should be replaced with updated spec.
+// EPA changed — existing HPA should be updated via SSA with the correct spec.
 #[tokio::test]
 async fn reconcile_updates_existing_hpa() -> Result<(), Box<dyn std::error::Error>> {
     crate::controller::externalpodautoscaler::telemetry::Telemetry::init();
@@ -170,6 +171,7 @@ async fn reconcile_sets_ready_status() -> Result<(), Box<dyn std::error::Error>>
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
+        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 
@@ -279,6 +281,7 @@ async fn reconcile_notifies_scraper_on_upsert() -> Result<(), Box<dyn std::error
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
+        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 

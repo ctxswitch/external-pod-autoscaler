@@ -187,6 +187,42 @@ impl MetricsStore {
             .unwrap_or_default()
     }
 
+    /// Evicts windows whose newest sample is older than `max_age`.
+    ///
+    /// Snapshots all window keys and Arc handles first (releasing DashMap shard
+    /// guards), then checks staleness under individual RwLock reads, and finally
+    /// removes stale entries in a separate pass.
+    ///
+    /// Empty windows (newly created, no samples yet) are retained to avoid
+    /// racing with concurrent `push_sample` calls.
+    pub async fn evict_stale_windows(&self, max_age: Duration) -> usize {
+        // Snapshot keys and Arc handles, releasing DashMap shard guards before
+        // awaiting any RwLock reads.
+        let entries: Vec<(SampleKey, Arc<RwLock<MetricWindow>>)> = self
+            .windows
+            .iter()
+            .map(|entry| (entry.key().clone(), Arc::clone(entry.value())))
+            .collect();
+
+        let mut stale_keys = Vec::new();
+        for (key, window_arc) in entries {
+            let window = window_arc.read().await;
+            // Only evict windows that have samples AND those samples are stale.
+            // Empty windows are retained (may be newly created).
+            let is_stale = window.newest_sample_age().is_some_and(|age| age > max_age);
+            if is_stale {
+                stale_keys.push(key);
+            }
+        }
+
+        let count = stale_keys.len();
+        for key in stale_keys {
+            self.windows.remove(&key);
+        }
+
+        count
+    }
+
     /// Removes all windows, cache entries, and configs for a specific EPA.
     ///
     /// Called when an EPA is deleted to clean up all associated metric data.

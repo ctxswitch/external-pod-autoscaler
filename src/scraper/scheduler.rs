@@ -43,6 +43,8 @@ pub struct Scheduler {
     job_tx: async_channel::Sender<ScrapeJob>,
     /// Tracks the next scheduled scrape time keyed by EPA name.
     next_scrape: HashMap<String, (Instant, Duration)>,
+    /// Last time stale window eviction ran.
+    last_eviction: Instant,
 }
 
 impl Scheduler {
@@ -63,6 +65,7 @@ impl Scheduler {
             metrics_store,
             job_tx,
             next_scrape: HashMap::new(),
+            last_eviction: Instant::now(),
         }
     }
 
@@ -113,6 +116,17 @@ impl Scheduler {
             let active_keys: HashSet<&str> = epas.iter().map(|(k, _)| k.as_str()).collect();
             self.next_scrape
                 .retain(|key, _| active_keys.contains(key.as_str()));
+
+            if tick_now.duration_since(self.last_eviction) >= Duration::from_secs(60) {
+                let evicted = self
+                    .metrics_store
+                    .evict_stale_windows(Duration::from_secs(120))
+                    .await;
+                if evicted > 0 {
+                    debug!(evicted_count = evicted, "Evicted stale metric windows");
+                }
+                self.last_eviction = tick_now;
+            }
         }
     }
 
@@ -155,7 +169,7 @@ impl Scheduler {
             return Ok(());
         }
         let interval_secs = interval_duration.as_secs().max(1);
-        let max_samples = (evaluation_period.as_secs().div_ceil(interval_secs) as usize).max(1);
+        let max_samples = (evaluation_period.as_secs().div_ceil(interval_secs) as usize).max(1) + 1;
 
         // Explicit opt-in; default to secure when the TLS block is absent.
         let use_insecure_tls = epa

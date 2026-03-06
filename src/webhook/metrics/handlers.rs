@@ -8,11 +8,11 @@ use axum::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 /// Handler for discovery endpoint
 pub async fn api_resource_list() -> Json<serde_json::Value> {
-    info!("Received API discovery request");
+    debug!("Received API discovery request");
 
     Json(serde_json::json!({
         "kind": "APIResourceList",
@@ -360,17 +360,36 @@ pub async fn get_external_metric(
             .get_metric_config(&epa_namespace, &epa_name, &actual_metric_name);
 
     // Aggregate across all pods using configured aggregation type and evaluation period
-    let aggregated_value =
+    let (aggregated_value, contributing_pods) =
         aggregate_metric(&windows, &config.aggregation_type, config.evaluation_period).await;
+
+    if contributing_pods == 0 {
+        warn!(
+            epa = %epa_name,
+            namespace = %epa_namespace,
+            metric = %actual_metric_name,
+            "No pods contributed samples within evaluation period"
+        );
+
+        telemetry
+            .api_requests
+            .with_label_values(&[&epa_namespace, &actual_metric_name, "no_contributors"])
+            .inc();
+
+        return Err(ApiError::MetricUnavailable(format!(
+            "no contributing pods for metric {}",
+            actual_metric_name
+        )));
+    }
 
     info!(
         epa = %epa_name,
         namespace = %epa_namespace,
         metric = %actual_metric_name,
         value = aggregated_value,
-        pod_count = windows.len(),
+        pod_count = contributing_pods,
         "Computed aggregated value from {} pods",
-        windows.len()
+        contributing_pods
     );
 
     // Cache the result (10s TTL)

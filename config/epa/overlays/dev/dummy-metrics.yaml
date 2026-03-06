@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dummy-metrics-value
+  namespace: epa-system
+data:
+  value: "0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dummy-metrics
+  namespace: epa-system
+  labels:
+    app: dummy-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dummy-metrics
+  template:
+    metadata:
+      labels:
+        app: dummy-metrics
+    spec:
+      containers:
+        - name: dummy-metrics
+          image: ctxsh/dummy-metrics:v0.0.2
+          args:
+            - "9090"
+            - "queue_depth"
+            - "dummy-metrics.epa-system.svc.cluster.local"
+          ports:
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          volumeMounts:
+            - name: metric-value
+              mountPath: /etc/dummy-metrics
+              readOnly: true
+      volumes:
+        - name: metric-value
+          configMap:
+            name: dummy-metrics-value
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dummy-metrics
+  namespace: epa-system
+spec:
+  clusterIP: None
+  selector:
+    app: dummy-metrics
+  ports:
+    - port: 9090
+      targetPort: 9090
+      protocol: TCP
+      name: metrics

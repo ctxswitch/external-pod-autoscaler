@@ -10,12 +10,14 @@ use k8s_openapi::api::autoscaling::v2::{
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kube::runtime::controller::Action;
-use kube::{api::Patch, api::PatchParams, api::PostParams, Api};
+use kube::{api::Patch, api::PatchParams, Api};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
+
+const FIELD_MANAGER: &str = "external-pod-autoscaler";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -139,7 +141,7 @@ impl Reconciler {
         }
 
         if is_owner {
-            let hpa_result = self.reconcile_hpa(epa_ref, &observed).await;
+            let hpa_result = self.reconcile_hpa(epa_ref).await;
 
             match hpa_result {
                 Ok(()) => {
@@ -302,57 +304,37 @@ impl Reconciler {
         }
     }
 
-    /// Reconcile the managed HPA
-    async fn reconcile_hpa(
-        &self,
-        epa: &ExternalPodAutoscaler,
-        observed: &ObservedState,
-    ) -> Result<(), Error> {
+    /// Reconcile the managed HPA via Server-Side Apply.
+    ///
+    /// If the HPA does not yet exist, SSA creates it. Otherwise it updates only
+    /// the fields owned by our field manager.
+    async fn reconcile_hpa(&self, epa: &ExternalPodAutoscaler) -> Result<(), Error> {
         let (name, namespace) = epa_name_namespace(epa)?;
 
         let hpa_api: Api<HorizontalPodAutoscaler> = Api::namespaced(self.client.clone(), namespace);
-
-        // Build desired HPA spec
         let desired_hpa = Self::build_hpa_spec(epa)?;
-
         let telemetry = Telemetry::global();
 
-        if observed.hpa_exists() {
-            // Update existing HPA
-            info!("Updating HPA {}/{}", namespace, name);
+        info!("Applying HPA {}/{}", namespace, name);
 
-            match hpa_api
-                .replace(name, &PostParams::default(), &desired_hpa)
-                .await
-            {
-                Ok(_) => {
-                    telemetry
-                        .hpa_operations
-                        .with_label_values(&[name, namespace, "update"])
-                        .inc();
-                    info!("Successfully updated HPA {}/{}", namespace, name);
-                }
-                Err(e) => {
-                    error!("Failed to update HPA {}/{}: {}", namespace, name, e);
-                    return Err(Error::Hpa(format!("Failed to update HPA: {e}")));
-                }
+        match hpa_api
+            .patch(
+                name,
+                &PatchParams::apply(FIELD_MANAGER).force(),
+                &Patch::Apply(&desired_hpa),
+            )
+            .await
+        {
+            Ok(_) => {
+                telemetry
+                    .hpa_operations
+                    .with_label_values(&[name, namespace, "apply"])
+                    .inc();
+                info!("Successfully applied HPA {}/{}", namespace, name);
             }
-        } else {
-            // Create new HPA
-            info!("Creating HPA {}/{}", namespace, name);
-
-            match hpa_api.create(&PostParams::default(), &desired_hpa).await {
-                Ok(_) => {
-                    telemetry
-                        .hpa_operations
-                        .with_label_values(&[name, namespace, "create"])
-                        .inc();
-                    info!("Successfully created HPA {}/{}", namespace, name);
-                }
-                Err(e) => {
-                    error!("Failed to create HPA {}/{}: {}", namespace, name, e);
-                    return Err(Error::Hpa(format!("Failed to create HPA: {e}")));
-                }
+            Err(e) => {
+                error!("Failed to apply HPA {}/{}: {}", namespace, name, e);
+                return Err(Error::Hpa(format!("Failed to apply HPA: {e}")));
             }
         }
 

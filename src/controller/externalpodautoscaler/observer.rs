@@ -1,6 +1,5 @@
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use anyhow::Result;
-use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use kube::{Api, Client};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -10,8 +9,6 @@ use std::time::SystemTime;
 pub struct ObservedState {
     /// The EPA resource being reconciled
     pub epa: Option<Arc<ExternalPodAutoscaler>>,
-    /// The managed HPA (if it exists)
-    pub hpa: Option<HorizontalPodAutoscaler>,
     /// Time when the observation was made
     pub observe_time: SystemTime,
 }
@@ -21,7 +18,6 @@ impl ObservedState {
     pub fn new() -> Self {
         Self {
             epa: None,
-            hpa: None,
             observe_time: SystemTime::now(),
         }
     }
@@ -42,11 +38,6 @@ impl ObservedState {
             .as_ref()
             .map(|e| e.metadata.deletion_timestamp.is_some())
             .unwrap_or(false)
-    }
-
-    /// Check if HPA exists
-    pub fn hpa_exists(&self) -> bool {
-        self.hpa.is_some()
     }
 }
 
@@ -89,11 +80,6 @@ impl StateObserver {
 
         observed.epa = Some(epa.clone());
 
-        // If the EPA exists and is not being deleted, observe HPA
-        if epa.metadata.deletion_timestamp.is_none() {
-            observed.hpa = self.observe_hpa().await?;
-        }
-
         // Update observation time
         observed.observe_time = SystemTime::now();
 
@@ -106,19 +92,6 @@ impl StateObserver {
 
         match api.get(&self.name).await {
             Ok(epa) => Ok(Some(epa)),
-            Err(kube::Error::Api(err)) if err.code == 404 => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Observe the managed HPA (if it exists)
-    async fn observe_hpa(&self) -> Result<Option<HorizontalPodAutoscaler>> {
-        let api: Api<HorizontalPodAutoscaler> =
-            Api::namespaced(self.client.clone(), &self.namespace);
-
-        // HPA has the same name as the EPA
-        match api.get(&self.name).await {
-            Ok(hpa) => Ok(Some(hpa)),
             Err(kube::Error::Api(err)) if err.code == 404 => Ok(None),
             Err(e) => Err(e.into()),
         }

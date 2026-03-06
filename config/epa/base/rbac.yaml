@@ -103,6 +103,7 @@ rules:
       - create
       - update
       - patch
+      - delete
 
   # Workload resource access
   # Controller needs to resolve Deployment/StatefulSet/DaemonSet for pod selectors
