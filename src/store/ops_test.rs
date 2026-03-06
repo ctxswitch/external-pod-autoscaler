@@ -1,6 +1,7 @@
 use super::types::{CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey};
 use super::MetricsStore;
 use crate::apis::ctx_sh::v1beta1::AggregationType;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -287,4 +288,53 @@ async fn remove_epa_cleans_scrape_stats() {
     let (scraped, errors) = fresh.snapshot_and_reset();
     assert_eq!(scraped, 0);
     assert_eq!(errors, 0);
+}
+
+#[tokio::test]
+async fn retain_pod_windows_removes_terminated_pods() {
+    let store = MetricsStore::new();
+
+    let sample = || LabeledSample {
+        value: 1.0,
+        scraped_at: Instant::now(),
+        success: true,
+        metric_type: MetricType::Gauge,
+    };
+
+    // Create windows for 3 pods under the same EPA
+    for pod in &["pod-1", "pod-2", "pod-3"] {
+        let key = SampleKey::new(
+            "default".to_string(),
+            "test-epa".to_string(),
+            "cpu".to_string(),
+            pod.to_string(),
+        );
+        store.push_sample(key, sample(), 10).await;
+    }
+
+    // Create a window for a different EPA to verify it's untouched
+    let other_key = SampleKey::new(
+        "default".to_string(),
+        "other-epa".to_string(),
+        "cpu".to_string(),
+        "pod-2".to_string(),
+    );
+    store.push_sample(other_key, sample(), 10).await;
+
+    // Only pod-1 and pod-3 are active
+    let active: HashSet<String> = ["pod-1", "pod-3"].iter().map(|s| s.to_string()).collect();
+    let removed = store.retain_pod_windows("default", "test-epa", &active);
+
+    assert_eq!(removed, 1, "pod-2 window should have been removed");
+
+    // pod-1 and pod-3 should still exist
+    let windows = store.get_windows("default", "test-epa", "cpu");
+    assert_eq!(windows.len(), 2);
+    let names: Vec<&str> = windows.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(names.contains(&"pod-1"));
+    assert!(names.contains(&"pod-3"));
+
+    // other-epa's pod-2 should be untouched
+    let other_windows = store.get_windows("default", "other-epa", "cpu");
+    assert_eq!(other_windows.len(), 1);
 }
