@@ -1,4 +1,4 @@
-use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey};
+use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey, ScrapeStats};
 use super::window::MetricWindow;
 use super::MetricsStore;
 use dashmap::DashMap;
@@ -13,6 +13,7 @@ impl MetricsStore {
             windows: Arc::new(DashMap::new()),
             cache: Arc::new(DashMap::new()),
             configs: Arc::new(DashMap::new()),
+            scrape_stats: Arc::new(DashMap::new()),
         }
     }
 
@@ -243,6 +244,17 @@ impl MetricsStore {
 
         self.configs
             .retain(|key, _| !(key.namespace == namespace && key.epa_name == epa_name));
+
+        let stats_key = format!("{}/{}", namespace, epa_name);
+        self.scrape_stats.remove(&stats_key);
+    }
+
+    pub fn get_scrape_stats(&self, namespace: &str, epa_name: &str) -> Arc<ScrapeStats> {
+        let key = format!("{}/{}", namespace, epa_name);
+        self.scrape_stats
+            .entry(key)
+            .or_insert_with(|| Arc::new(ScrapeStats::new()))
+            .clone()
     }
 
     /// Cleans up expired cache entries.
@@ -294,6 +306,7 @@ impl Clone for MetricsStore {
             windows: self.windows.clone(),
             cache: self.cache.clone(),
             configs: self.configs.clone(),
+            scrape_stats: self.scrape_stats.clone(),
         }
     }
 }

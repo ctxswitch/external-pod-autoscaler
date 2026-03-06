@@ -168,6 +168,21 @@ impl Scheduler {
         {
             return Ok(());
         }
+
+        // Snapshot previous round's stats and patch EPA status
+        let stats = self.metrics_store.get_scrape_stats(namespace, name);
+        let (scraped, errors) = stats.snapshot_and_reset();
+
+        if scraped > 0 || errors > 0 {
+            if let Err(e) = self
+                .patch_epa_status(namespace, name, scraped, errors)
+                .await
+            {
+                warn!(epa = %key, error = %e, "Failed to patch EPA status");
+                stats.restore(scraped, errors);
+            }
+        }
+
         let interval_secs = interval_duration.as_secs().max(1);
         let max_samples = (evaluation_period.as_secs().div_ceil(interval_secs) as usize).max(1) + 1;
 
@@ -201,13 +216,7 @@ impl Scheduler {
                 .unwrap_or(&epa.spec.scrape.aggregation_type)
                 .clone();
 
-            let eval_period = if let Some(period_str) = &metric_spec.evaluation_period {
-                parse_duration(period_str)?
-            } else {
-                evaluation_period
-            };
-
-            let config = MetricConfig::new(agg_type, eval_period);
+            let config = MetricConfig::new(agg_type);
             self.metrics_store
                 .set_metric_config(namespace, name, &metric_spec.metric_name, config);
         }
@@ -247,6 +256,28 @@ impl Scheduler {
             })?;
         }
 
+        Ok(())
+    }
+
+    async fn patch_epa_status(
+        &self,
+        namespace: &str,
+        name: &str,
+        scraped_replicas: i32,
+        scrape_errors: i32,
+    ) -> anyhow::Result<()> {
+        use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
+        use kube::api::{Api, Patch, PatchParams};
+
+        let api: Api<ExternalPodAutoscaler> = Api::namespaced(self.client.clone(), namespace);
+        let status = serde_json::json!({
+            "status": {
+                "scrapedReplicas": scraped_replicas,
+                "scrapeErrors": scrape_errors,
+            }
+        });
+        api.patch_status(name, &PatchParams::default(), &Patch::Merge(status))
+            .await?;
         Ok(())
     }
 }

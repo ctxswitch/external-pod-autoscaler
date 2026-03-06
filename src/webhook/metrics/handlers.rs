@@ -39,7 +39,7 @@ pub async fn get_external_metric(
     let start = std::time::Instant::now();
     let telemetry = Telemetry::global();
 
-    info!(
+    debug!(
         namespace = %namespace,
         metric_name = %metric_name,
         "Received external metrics request"
@@ -49,7 +49,7 @@ pub async fn get_external_metric(
     let (epa_name, epa_namespace, actual_metric_name) =
         parse_external_metric_name(&namespace, &metric_name)?;
 
-    info!(
+    debug!(
         epa_name = %epa_name,
         epa_namespace = %epa_namespace,
         metric = %actual_metric_name,
@@ -270,7 +270,7 @@ pub async fn get_external_metric(
     }
 
     // This replica owns this EPA - proceed with local processing
-    info!(epa_key = %epa_key, "Processing request locally");
+    debug!(epa_key = %epa_key, "Processing request");
 
     // Check cache first
     if let Some(cached_value) =
@@ -278,7 +278,7 @@ pub async fn get_external_metric(
             .metrics_store
             .get_cached(&epa_namespace, &epa_name, &actual_metric_name)
     {
-        info!(
+        debug!(
             epa = %epa_name,
             namespace = %epa_namespace,
             metric = %actual_metric_name,
@@ -359,16 +359,16 @@ pub async fn get_external_metric(
             .metrics_store
             .get_metric_config(&epa_namespace, &epa_name, &actual_metric_name);
 
-    // Aggregate across all pods using configured aggregation type and evaluation period
+    // Aggregate across all pods using configured aggregation type
     let (aggregated_value, contributing_pods) =
-        aggregate_metric(&windows, &config.aggregation_type, config.evaluation_period).await;
+        aggregate_metric(&windows, &config.aggregation_type).await;
 
     if contributing_pods == 0 {
         warn!(
             epa = %epa_name,
             namespace = %epa_namespace,
             metric = %actual_metric_name,
-            "No pods contributed samples within evaluation period"
+            "No pods contributed samples in window"
         );
 
         telemetry

@@ -148,7 +148,7 @@ async fn store_remove_epa_windows() {
         "default",
         "epa-1",
         "metric_a",
-        MetricConfig::new(AggregationType::Max, Duration::from_secs(120)),
+        MetricConfig::new(AggregationType::Max),
     );
 
     // Remove EPA 1
@@ -167,7 +167,7 @@ async fn store_remove_epa_windows() {
 async fn store_metric_config_roundtrip() {
     let store = MetricsStore::new();
 
-    let config = MetricConfig::new(AggregationType::Median, Duration::from_secs(300));
+    let config = MetricConfig::new(AggregationType::Median);
     store.set_metric_config("prod", "scaler", "queue_depth", config);
 
     let retrieved = store.get_metric_config("prod", "scaler", "queue_depth");
@@ -175,7 +175,6 @@ async fn store_metric_config_roundtrip() {
         matches!(retrieved.aggregation_type, AggregationType::Median),
         "aggregation type should be Median"
     );
-    assert_eq!(retrieved.evaluation_period, Duration::from_secs(300));
 
     // Non-existent config should return defaults
     let default_config = store.get_metric_config("prod", "scaler", "nonexistent");
@@ -183,7 +182,6 @@ async fn store_metric_config_roundtrip() {
         default_config.aggregation_type,
         AggregationType::Avg
     ));
-    assert_eq!(default_config.evaluation_period, Duration::from_secs(60));
 }
 
 // Cache with short TTL, sleep, cleanup removes expired entries.
@@ -233,51 +231,60 @@ async fn store_cleanup_expired_cache() {
         .is_some());
 }
 
-// Push samples at different times, get_samples_in_period filters correctly.
-#[tokio::test]
-async fn window_get_samples_in_period() {
+#[test]
+fn scrape_stats_record_and_snapshot() {
     let store = MetricsStore::new();
-    let key = SampleKey::new(
-        "default".to_string(),
-        "test-epa".to_string(),
-        "metric_x".to_string(),
-        "pod-1".to_string(),
-    );
+    let stats = store.get_scrape_stats("default", "test-epa");
 
-    // Push an old sample (120s ago)
-    let old_sample = LabeledSample {
-        value: 999.0,
-        scraped_at: Instant::now() - Duration::from_secs(120),
-        success: true,
-        metric_type: MetricType::Gauge,
-    };
-    store.push_sample(key.clone(), old_sample, 100).await;
+    stats.record_success();
+    stats.record_success();
+    stats.record_error();
 
-    // Push a recent sample (5s ago)
-    let recent_sample = LabeledSample {
-        value: 42.0,
-        scraped_at: Instant::now() - Duration::from_secs(5),
-        success: true,
-        metric_type: MetricType::Gauge,
-    };
-    store.push_sample(key, recent_sample, 100).await;
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 2);
+    assert_eq!(errors, 1);
+}
 
-    let windows = store.get_windows("default", "test-epa", "metric_x");
-    assert_eq!(windows.len(), 1);
+#[test]
+fn scrape_stats_snapshot_and_reset_zeroes() {
+    let store = MetricsStore::new();
+    let stats = store.get_scrape_stats("default", "test-epa");
 
-    let window = windows[0].1.read().await;
-    assert_eq!(
-        window.samples.len(),
-        2,
-        "window should have 2 total samples"
-    );
+    stats.record_success();
+    stats.record_error();
 
-    // Filter for last 60s
-    let in_period = window.get_samples_in_period(Duration::from_secs(60));
-    assert_eq!(
-        in_period.len(),
-        1,
-        "only 1 sample should be within 60s period"
-    );
-    assert_eq!(in_period[0].value, 42.0);
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 1);
+    assert_eq!(errors, 1);
+
+    // Second call should return zeros
+    let (scraped, errors) = stats.snapshot_and_reset();
+    assert_eq!(scraped, 0);
+    assert_eq!(errors, 0);
+}
+
+#[test]
+fn scrape_stats_shared_instance() {
+    let store = MetricsStore::new();
+    let stats1 = store.get_scrape_stats("default", "test-epa");
+    let stats2 = store.get_scrape_stats("default", "test-epa");
+
+    stats1.record_success();
+    let (scraped, _) = stats2.snapshot_and_reset();
+    assert_eq!(scraped, 1, "both Arcs should point to the same instance");
+}
+
+#[tokio::test]
+async fn remove_epa_cleans_scrape_stats() {
+    let store = MetricsStore::new();
+    let stats = store.get_scrape_stats("default", "epa-1");
+    stats.record_success();
+
+    store.remove_epa_windows("default", "epa-1");
+
+    // After removal, get_scrape_stats should return a fresh instance
+    let fresh = store.get_scrape_stats("default", "epa-1");
+    let (scraped, errors) = fresh.snapshot_and_reset();
+    assert_eq!(scraped, 0);
+    assert_eq!(errors, 0);
 }

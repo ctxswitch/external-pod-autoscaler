@@ -1,4 +1,5 @@
 use crate::apis::ctx_sh::v1beta1::AggregationType;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
 /// Type of Prometheus metric (auto-detected from scrape).
@@ -115,23 +116,18 @@ impl CachedAggregation {
 
 /// Configuration for metric aggregation.
 ///
-/// Stores aggregation settings from the EPA spec (aggregation type and evaluation period).
+/// Stores aggregation settings from the EPA spec (aggregation type).
 /// Can be set per-metric or use defaults from the EPA scrape config.
 #[derive(Debug, Clone)]
 pub struct MetricConfig {
     /// Aggregation type (avg, max, min, median, last)
     pub aggregation_type: AggregationType,
-    /// Evaluation period for aggregation window
-    pub evaluation_period: Duration,
 }
 
 impl MetricConfig {
     /// Creates a new metric configuration.
-    pub fn new(aggregation_type: AggregationType, evaluation_period: Duration) -> Self {
-        Self {
-            aggregation_type,
-            evaluation_period,
-        }
+    pub fn new(aggregation_type: AggregationType) -> Self {
+        Self { aggregation_type }
     }
 }
 
@@ -139,7 +135,48 @@ impl Default for MetricConfig {
     fn default() -> Self {
         Self {
             aggregation_type: AggregationType::Avg,
-            evaluation_period: Duration::from_secs(60),
         }
+    }
+}
+
+/// Per-EPA scrape statistics, updated by the worker pool.
+#[derive(Debug)]
+pub struct ScrapeStats {
+    scraped: AtomicI32,
+    errors: AtomicI32,
+}
+
+impl ScrapeStats {
+    pub fn new() -> Self {
+        Self {
+            scraped: AtomicI32::new(0),
+            errors: AtomicI32::new(0),
+        }
+    }
+
+    pub fn record_success(&self) {
+        self.scraped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_error(&self) {
+        self.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn snapshot_and_reset(&self) -> (i32, i32) {
+        (
+            self.scraped.swap(0, Ordering::Relaxed),
+            self.errors.swap(0, Ordering::Relaxed),
+        )
+    }
+
+    pub fn restore(&self, scraped: i32, errors: i32) {
+        self.scraped.fetch_add(scraped, Ordering::Relaxed);
+        self.errors.fetch_add(errors, Ordering::Relaxed);
+    }
+}
+
+impl Default for ScrapeStats {
+    fn default() -> Self {
+        Self::new()
     }
 }

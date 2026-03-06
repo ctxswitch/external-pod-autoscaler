@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, ResourceExt};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 /// Worker that scrapes metrics from pods.
 ///
@@ -67,7 +67,7 @@ impl Worker {
     /// Blocks until the channel is closed (all senders dropped), processing
     /// one job at a time. Each job triggers an HTTP scrape of a single pod.
     pub async fn run(self) {
-        info!("Worker started");
+        debug!("Worker started");
 
         while let Ok(job) = self.job_rx.recv().await {
             let epa_name = job.epa.metadata.name.as_deref().unwrap_or("<unnamed>");
@@ -85,6 +85,7 @@ impl Worker {
             };
 
             let telemetry = Telemetry::global();
+            let scrape_stats = self.metrics_store.get_scrape_stats(namespace, epa_name);
 
             match Self::scrape_pod_static(
                 http_client,
@@ -100,6 +101,7 @@ impl Worker {
                         .pods_scraped
                         .with_label_values(&[epa_name, namespace])
                         .inc();
+                    scrape_stats.record_success();
                 }
                 Err(e) => {
                     warn!(epa = %epa_name, namespace = %namespace, error = %e, "Pod scrape failed");
@@ -107,6 +109,7 @@ impl Worker {
                         .scrape_errors
                         .with_label_values(&[epa_name, namespace, "pod_scrape_failed"])
                         .inc();
+                    scrape_stats.record_error();
                 }
             }
         }
