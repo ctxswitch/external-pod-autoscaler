@@ -9,8 +9,8 @@ A Kubernetes controller that scrapes Prometheus metrics directly from pods and m
 ## Install
 
 ```bash
-helm repo add ctxsh https://ctxswitch.github.io/external-pod-autoscaler
-helm install epa ctxsh/external-pod-autoscaler --namespace epa-system --create-namespace
+helm repo add epa https://ctxswitch.github.io/external-pod-autoscaler
+helm install epa epa/external-pod-autoscaler --namespace epa-system --create-namespace
 ```
 
 ## Usage

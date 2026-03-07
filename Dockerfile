@@ -1,4 +1,5 @@
-FROM rust:1.94 AS builder
+FROM rust:1.94-alpine AS builder
+RUN apk add --no-cache musl-dev
 WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src && \
@@ -10,7 +11,7 @@ RUN mkdir -p src && \
 COPY src ./src
 RUN cargo build --release
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM alpine:3
+RUN apk add --no-cache ca-certificates
 COPY --from=builder /usr/src/app/target/release/external-pod-autoscaler /usr/local/bin/
 ENTRYPOINT ["external-pod-autoscaler"]
