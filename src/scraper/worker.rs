@@ -211,10 +211,10 @@ impl Worker {
             // For each matching metric (could have different labels), store a sample
             for prom_metric in matching_metrics {
                 // Filter by label selector if specified
-                if let Some(ref label_selector) = metric_spec.label_selector {
-                    if !matches_label_selector(&prom_metric.labels, label_selector) {
-                        continue;
-                    }
+                if let Some(ref label_selector) = metric_spec.label_selector
+                    && !matches_label_selector(&prom_metric.labels, label_selector)
+                {
+                    continue;
                 }
 
                 let sample = LabeledSample {
@@ -387,12 +387,11 @@ fn matches_label_selector(
                     }
                 }
                 LabelSelectorOperator::NotIn => {
-                    if let Some(ref values) = expr.values {
-                        if let Some(v) = label_value {
-                            if values.contains(v) {
-                                return false;
-                            }
-                        }
+                    if let Some(ref values) = expr.values
+                        && let Some(v) = label_value
+                        && values.contains(v)
+                    {
+                        return false;
                     }
                 }
                 LabelSelectorOperator::Exists => {

@@ -173,14 +173,13 @@ impl Scheduler {
         let stats = self.metrics_store.get_scrape_stats(namespace, name);
         let (scraped, errors) = stats.snapshot_and_reset();
 
-        if scraped > 0 || errors > 0 {
-            if let Err(e) = self
+        if (scraped > 0 || errors > 0)
+            && let Err(e) = self
                 .patch_epa_status(namespace, name, scraped, errors)
                 .await
-            {
-                warn!(epa = %key, error = %e, "Failed to patch EPA status");
-                stats.restore(scraped, errors);
-            }
+        {
+            warn!(epa = %key, error = %e, "Failed to patch EPA status");
+            stats.restore(scraped, errors);
         }
 
         let interval_secs = interval_duration.as_secs().max(1);

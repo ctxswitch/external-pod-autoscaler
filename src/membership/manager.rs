@@ -268,20 +268,20 @@ impl MembershipManager {
 
                     if now < expires_at {
                         // Extract replica ID from lease name (epa-replica-{id})
-                        if let Some(name) = &lease.metadata.name {
-                            if let Some(replica_id) = name.strip_prefix("epa-replica-") {
-                                let is_draining = lease
-                                    .metadata
-                                    .labels
-                                    .as_ref()
-                                    .and_then(|l| l.get("draining"))
-                                    .is_some_and(|v| v == "true");
+                        if let Some(name) = &lease.metadata.name
+                            && let Some(replica_id) = name.strip_prefix("epa-replica-")
+                        {
+                            let is_draining = lease
+                                .metadata
+                                .labels
+                                .as_ref()
+                                .and_then(|l| l.get("draining"))
+                                .is_some_and(|v| v == "true");
 
-                                if is_draining {
-                                    draining.insert(replica_id.to_string());
-                                } else {
-                                    active.insert(replica_id.to_string());
-                                }
+                            if is_draining {
+                                draining.insert(replica_id.to_string());
+                            } else {
+                                active.insert(replica_id.to_string());
                             }
                         }
                     }
