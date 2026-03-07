@@ -7,7 +7,7 @@ use anyhow::Result;
 use kube::Client;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
 /// Message to notify scraper of EPA changes.

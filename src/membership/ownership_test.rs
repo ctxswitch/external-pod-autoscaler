@@ -678,8 +678,8 @@ async fn get_previous_epa_owner_returns_draining_replica() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn get_previous_epa_owner_returns_none_when_no_replicas(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn get_previous_epa_owner_returns_none_when_no_replicas()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let client = ClientBuilder::new().build().await?;
     let manager = Arc::new(MembershipManager::new(
@@ -705,8 +705,8 @@ async fn get_previous_epa_owner_returns_none_when_no_replicas(
 }
 
 #[tokio::test]
-async fn get_previous_epa_owner_matches_current_when_no_draining(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn get_previous_epa_owner_matches_current_when_no_draining()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let replica_a = "replica-a";
     let replica_b = "replica-b";
@@ -737,8 +737,8 @@ async fn get_previous_epa_owner_matches_current_when_no_draining(
 }
 
 #[tokio::test]
-async fn get_epa_owner_returns_new_owner_during_transition(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn get_epa_owner_returns_new_owner_during_transition()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let replica_a = "replica-a";
     let replica_b = "replica-b";
@@ -902,8 +902,8 @@ async fn lost_owner_stops_after_grace_window_expires() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
-async fn get_previous_epa_owner_unchanged_when_non_winner_drains(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn get_previous_epa_owner_unchanged_when_non_winner_drains()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let replica_a = "replica-a";
     let replica_b = "replica-b";
@@ -986,8 +986,8 @@ async fn get_previous_epa_owner_unchanged_when_non_winner_drains(
 }
 
 #[tokio::test(start_paused = true)]
-async fn should_serve_immediately_when_previous_owner_gone(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn should_serve_immediately_when_previous_owner_gone()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let replica_id = "replica-1";
 

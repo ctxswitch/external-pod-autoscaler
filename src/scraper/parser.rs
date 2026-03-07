@@ -1,5 +1,5 @@
 use crate::store::MetricType;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::BTreeMap;
 
 /// Parsed Prometheus metric

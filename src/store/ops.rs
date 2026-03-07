@@ -1,6 +1,6 @@
+use super::MetricsStore;
 use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey, ScrapeStats};
 use super::window::MetricWindow;
-use super::MetricsStore;
 use dashmap::DashMap;
 use std::collections::HashSet;
 use std::sync::Arc;

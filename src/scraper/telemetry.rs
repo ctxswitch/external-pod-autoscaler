@@ -1,5 +1,5 @@
 use prometheus::{
-    opts, register_histogram_vec, register_int_counter_vec, HistogramVec, IntCounterVec,
+    HistogramVec, IntCounterVec, opts, register_histogram_vec, register_int_counter_vec,
 };
 use std::sync::OnceLock;
 
@@ -52,7 +52,9 @@ impl Telemetry {
                 "epa_scrape_enqueue_wait_seconds",
                 "Time blocked waiting to enqueue a scrape job (non-zero only under backpressure)",
                 &["epa", "namespace"],
-                vec![0.000_1, 0.001, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0]
+                vec![
+                    0.000_1, 0.001, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0
+                ]
             )
             .expect("Failed to register enqueue_wait metric");
 

@@ -2,7 +2,7 @@ use super::parser::parse_prometheus_text;
 use super::telemetry::Telemetry;
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use crate::store::{LabeledSample, MetricsStore, SampleKey};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, ResourceExt};
 use std::time::{Duration, Instant};

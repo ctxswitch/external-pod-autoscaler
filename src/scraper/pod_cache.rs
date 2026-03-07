@@ -1,8 +1,8 @@
 use dashmap::DashMap;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Pod;
-use kube::runtime::{reflector, watcher, WatchStreamExt};
 use kube::Api;
+use kube::runtime::{WatchStreamExt, reflector, watcher};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;

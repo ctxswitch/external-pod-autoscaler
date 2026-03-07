@@ -1,5 +1,5 @@
-use super::types::{CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey};
 use super::MetricsStore;
+use super::types::{CachedAggregation, LabeledSample, MetricConfig, MetricType, SampleKey};
 use crate::apis::ctx_sh::v1beta1::AggregationType;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -209,12 +209,16 @@ async fn store_cleanup_expired_cache() {
     );
 
     // Both should be present initially
-    assert!(store
-        .get_cached("default", "test-epa", "metric_1")
-        .is_some());
-    assert!(store
-        .get_cached("default", "test-epa", "metric_2")
-        .is_some());
+    assert!(
+        store
+            .get_cached("default", "test-epa", "metric_1")
+            .is_some()
+    );
+    assert!(
+        store
+            .get_cached("default", "test-epa", "metric_2")
+            .is_some()
+    );
 
     // Wait for short-lived entry to expire
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -223,13 +227,17 @@ async fn store_cleanup_expired_cache() {
     assert!(removed >= 1, "at least one entry should be cleaned up");
 
     // Short-lived should be gone
-    assert!(store
-        .get_cached("default", "test-epa", "metric_1")
-        .is_none());
+    assert!(
+        store
+            .get_cached("default", "test-epa", "metric_1")
+            .is_none()
+    );
     // Long-lived should still be there
-    assert!(store
-        .get_cached("default", "test-epa", "metric_2")
-        .is_some());
+    assert!(
+        store
+            .get_cached("default", "test-epa", "metric_2")
+            .is_some()
+    );
 }
 
 #[test]

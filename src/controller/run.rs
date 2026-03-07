@@ -6,7 +6,7 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::{
     APIService, APIServiceSpec, ServiceReference,
 };
-use kube::{api::PostParams, Api, Client, CustomResourceExt};
+use kube::{Api, Client, CustomResourceExt, api::PostParams};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};

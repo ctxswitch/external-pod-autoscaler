@@ -1,5 +1,5 @@
 use prometheus::{
-    opts, register_histogram_vec, register_int_counter_vec, HistogramVec, IntCounterVec,
+    HistogramVec, IntCounterVec, opts, register_histogram_vec, register_int_counter_vec,
 };
 use std::sync::OnceLock;
 

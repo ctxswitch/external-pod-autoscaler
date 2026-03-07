@@ -8,7 +8,7 @@ use super::handlers::{AdmissionRequest, AdmissionReview, GroupVersionKind, Group
 use crate::membership::manager::MembershipManager;
 use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
-use crate::webhook::server::{build_router, AppState};
+use crate::webhook::server::{AppState, build_router};
 
 use kube_fake_client::ClientBuilder;
 

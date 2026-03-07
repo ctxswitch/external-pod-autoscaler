@@ -10,7 +10,7 @@ use k8s_openapi::api::autoscaling::v2::{
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kube::runtime::controller::Action;
-use kube::{api::Patch, api::PatchParams, Api};
+use kube::{Api, api::Patch, api::PatchParams};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;

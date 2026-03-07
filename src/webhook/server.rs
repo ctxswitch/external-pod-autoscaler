@@ -3,7 +3,7 @@ use crate::membership::manager::MembershipManager;
 use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
 use anyhow::{Context, Result};
-use axum::{routing::get, routing::post, Router};
+use axum::{Router, routing::get, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use std::path::PathBuf;
 use std::sync::Arc;

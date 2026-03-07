@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use k8s_openapi::api::coordination::v1::Lease;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{MicroTime, ObjectMeta, OwnerReference};
 use kube::{
-    api::{Api, DeleteParams, Patch, PatchParams, PostParams},
-    runtime::{watcher, WatchStreamExt},
     Client,
+    api::{Api, DeleteParams, Patch, PatchParams, PostParams},
+    runtime::{WatchStreamExt, watcher},
 };
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;

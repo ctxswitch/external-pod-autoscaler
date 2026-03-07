@@ -569,8 +569,8 @@ async fn delete_lease_idempotent() -> Result<(), Box<dyn std::error::Error>> {
 
 // get_all_replicas returns the union of the active and draining sets.
 #[tokio::test]
-async fn get_all_replicas_returns_union_of_active_and_draining(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn get_all_replicas_returns_union_of_active_and_draining()
+-> Result<(), Box<dyn std::error::Error>> {
     let namespace = "test-ns";
     let now = k8s_openapi::jiff::Timestamp::now();
 

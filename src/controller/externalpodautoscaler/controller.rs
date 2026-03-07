@@ -5,7 +5,7 @@ use crate::scraper::EpaUpdate;
 use crate::store::MetricsStore;
 use futures::StreamExt;
 use kube::runtime::{
-    controller::Controller as KubeController, predicates, reflector, watcher, WatchStreamExt,
+    WatchStreamExt, controller::Controller as KubeController, predicates, reflector, watcher,
 };
 use kube::{Api, Client};
 use std::sync::Arc;

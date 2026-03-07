@@ -1,9 +1,9 @@
 use crate::apis::ctx_sh::v1beta1::ExternalPodAutoscaler;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

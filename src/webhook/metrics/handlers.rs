@@ -1,9 +1,9 @@
 use super::{aggregation::aggregate_metric, telemetry::Telemetry, types::*};
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
