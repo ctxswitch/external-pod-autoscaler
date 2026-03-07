@@ -8,9 +8,11 @@ A Kubernetes controller that scrapes Prometheus metrics directly from pods and m
 
 ## Install
 
+Requires [cert-manager](https://cert-manager.io/) for webhook TLS. The chart includes cert-manager as a subchart and installs it by default. If you already have cert-manager in your cluster, disable the subchart with `--set cert-manager.enabled=false`.
+
 ```bash
 helm repo add epa https://ctxswitch.github.io/external-pod-autoscaler
-helm install epa epa/external-pod-autoscaler --namespace epa-system --create-namespace
+helm upgrade --install epa epa/external-pod-autoscaler --namespace epa-system --create-namespace
 ```
 
 ## Usage

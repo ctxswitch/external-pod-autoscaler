@@ -162,7 +162,7 @@ jobs:
             ```bash
             helm repo add epa https://ctxswitch.github.io/external-pod-autoscaler
             helm repo update
-            helm install epa epa/external-pod-autoscaler
+            helm upgrade --install epa epa/external-pod-autoscaler --namespace epa-system --create-namespace
             ```
 
             ## Changelog

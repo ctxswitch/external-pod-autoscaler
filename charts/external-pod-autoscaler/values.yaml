@@ -30,7 +30,7 @@ service:
   webhookNodePort: null
 
 cert-manager:
-  enabled: false
+  enabled: true
   crds:
     enabled: true
 
