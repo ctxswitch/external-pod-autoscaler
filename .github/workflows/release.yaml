@@ -80,8 +80,6 @@ jobs:
           tags: |
             ctxsh/external-pod-autoscaler:${{ needs.resolve-tag.outputs.tag }}
             ctxsh/external-pod-autoscaler:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   helm:
     name: Helm Chart
@@ -97,6 +95,7 @@ jobs:
 
       - name: Package chart
         run: |
+          helm dependency build charts/external-pod-autoscaler
           mkdir -p .helm-packages
           helm package charts/external-pod-autoscaler -d .helm-packages
 
