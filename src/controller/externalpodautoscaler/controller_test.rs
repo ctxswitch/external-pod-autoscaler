@@ -61,7 +61,6 @@ async fn reconcile_applies_hpa() -> Result<(), Box<dyn std::error::Error>> {
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
-        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 
@@ -171,7 +170,6 @@ async fn reconcile_sets_ready_status() -> Result<(), Box<dyn std::error::Error>>
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
-        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 
@@ -281,7 +279,6 @@ async fn reconcile_notifies_scraper_on_upsert() -> Result<(), Box<dyn std::error
         .with_resource::<Lease>()
         .with_fixture_dir("tests/fixtures")
         .load_fixture_or_panic("epa-basic.yaml")
-        .load_fixture_or_panic("hpa-stub.yaml")
         .build()
         .await?;
 

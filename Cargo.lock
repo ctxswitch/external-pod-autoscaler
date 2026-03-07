@@ -1758,9 +1758,9 @@ dependencies = [
 
 [[package]]
 name = "kube-fake-client"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "770de48574b2ef33ddd3bbaaf73e5d5a3118e83a482fc1f53fa7217ff88be508"
+checksum = "4000bbdcc7aa5c321baf98237603e99d199816f5f78b4d751aab5c1a3d64c5d9"
 dependencies = [
  "async-trait",
  "bytes",
