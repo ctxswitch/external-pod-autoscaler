@@ -49,7 +49,7 @@ fn make_admission_review(uid: &str, object: Option<serde_json::Value>) -> Admiss
             resource: GroupVersionResource {
                 group: "ctx.sh".to_string(),
                 version: "v1beta1".to_string(),
-                resource: "externalpodautoscalers".to_string(),
+                resource: "epas".to_string(),
             },
             operation: "CREATE".to_string(),
             object,

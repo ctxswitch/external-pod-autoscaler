@@ -1,0 +1,44 @@
+replicaCount: 1
+
+image:
+  repository: ctxsh/external-pod-autoscaler
+  tag: ""  # defaults to appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+controller:
+  command:
+    - /usr/local/bin/external-pod-autoscaler
+  workingDir: ""
+  logLevel: info
+  enableWebhooks: true
+  scraperWorkers: 20
+  securityContext: {}
+
+service:
+  type: ClusterIP
+  webhookPort: 443
+  metricsPort: 9090
+  webhookNodePort: null
+
+cert-manager:
+  enabled: false
+  crds:
+    enabled: true
+
+resources: {}
+
+extraVolumes: []
+extraVolumeMounts: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

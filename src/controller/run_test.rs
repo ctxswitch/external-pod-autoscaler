@@ -20,10 +20,7 @@ async fn install_crd_creates_when_missing() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("CRD metadata missing name"))?;
 
     let found = crd_api.get(&crd_name).await?;
-    assert_eq!(
-        found.metadata.name.as_deref(),
-        Some("externalpodautoscalers.ctx.sh"),
-    );
+    assert_eq!(found.metadata.name.as_deref(), Some("epas.ctx.sh"),);
 
     Ok(())
 }
@@ -47,10 +44,7 @@ async fn install_crd_updates_when_exists() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("CRD metadata missing name"))?;
 
     let found = crd_api.get(&crd_name).await?;
-    assert_eq!(
-        found.metadata.name.as_deref(),
-        Some("externalpodautoscalers.ctx.sh"),
-    );
+    assert_eq!(found.metadata.name.as_deref(), Some("epas.ctx.sh"),);
 
     Ok(())
 }

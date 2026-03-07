@@ -9,7 +9,8 @@ A Kubernetes controller that scrapes Prometheus metrics directly from pods and m
 ## Install
 
 ```bash
-kustomize build config/epa/base | kubectl apply -f -
+helm repo add ctxsh https://ctxswitch.github.io/external-pod-autoscaler
+helm install epa ctxsh/external-pod-autoscaler --namespace epa-system --create-namespace
 ```
 
 ## Usage
@@ -39,49 +40,126 @@ spec:
     targetValue: "100"
 ```
 
-The controller will scrape the Prometheus metrics endpoint on your pods, aggregate the values over a sliding window, and create a native HPA to scale the target deployment.
+The controller scrapes Prometheus metrics directly from pods, aggregates values over a sliding window, and creates a native HPA to scale the target deployment.
 
-If `scrapeTargetRef` is omitted it defaults to `scaleTargetRef`. Set it explicitly to scrape metrics from a different workload than the one being scaled.
+### Scraping from a different workload
 
-```bash
-kubectl get epa
-kubectl describe epa my-app-scaler
+By default the controller scrapes metrics from the same workload it scales (`scaleTargetRef`). Set `scrapeTargetRef` to decouple them — scrape metrics from one workload while scaling another. This is useful for producer/consumer patterns where the scaling signal lives on a different service than the one being scaled:
+
+```yaml
+spec:
+  scaleTargetRef:
+    kind: Deployment
+    name: consumer         # workload to scale
+  scrapeTargetRef:
+    kind: Deployment
+    name: producer         # workload to scrape metrics from
+  metrics:
+    - metricName: queue_depth
+      targetValue: "100"
 ```
 
 ## CRD Reference
 
-| Field | Default | Description                                                                                                                               |
-|---|---|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `minReplicas` | `1` | Minimum replica count                                                                                                                     |
-| `maxReplicas` | *required* | Maximum replica count                                                                                                                     |
-| `scrape.port` | `8080` | Metrics port                                                                                                                              |
-| `scrape.path` | `/metrics` | Metrics path                                                                                                                              |
-| `scrape.interval` | `15s` | Scrape interval                                                                                                                           |
-| `scrape.timeout` | `1s` | Per-pod scrape timeout                                                                                                                    |
-| `scrape.scheme` | `http` | `http` or `https`                                                                                                                         |
-| `scrape.tls.insecureSkipVerify` | `false` | Skip TLS verification                                                                                                                     |
-| `scrape.evaluationPeriod` | `60s` | Sliding window size                                                                                                                       |
-| `scrape.aggregationType` | `avg` | `avg`, `max`, `min`, `median`, `last`                                                                                                     |
-| `scrapeTargetRef` | *(scaleTargetRef)* | Workload whose pods are scraped for metrics.  This allows you to target other services for metrics (think producer/consumer relationship) |
-| `scaleTargetRef` | *required* | Workload to scale                                                                                                                         |
-| `metrics[].metricName` | *required* | Prometheus metric name                                                                                                                    |
-| `metrics[].type` | `AverageValue` | `AverageValue` or `Value`                                                                                                                 |
-| `metrics[].targetValue` | *required* | Target value                                                                                                                              |
-| `metrics[].aggregationType` | *(from scrape)* | Per-metric override                                                                                                                       |
-| `metrics[].evaluationPeriod` | *(from scrape)* | Per-metric override                                                                                                                       |
-| `metrics[].labelSelector` | — | Filter by Prometheus labels                                                                                                               |
-| `behavior` | — | Pass-through to HPA behavior spec                                                                                                         |
+All duration fields accept humantime strings: `15s`, `1m`, `5m`, `1h`.
 
-Durations accept humantime strings: `15s`, `1m`, `5m`, `1h`.
+### `spec`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `minReplicas` | int | `1` | Minimum replica count |
+| `maxReplicas` | int | **required** | Maximum replica count |
+| `scrape` | [ScrapeConfig](#scrape) | — | Metrics scraping configuration |
+| `scaleTargetRef` | [TargetRef](#targetref) | **required** | Workload to scale |
+| `scrapeTargetRef` | [TargetRef](#targetref) | *(scaleTargetRef)* | Workload to scrape metrics from. Defaults to `scaleTargetRef` if omitted. Set this to scrape a different workload than the one being scaled (e.g. a producer/consumer pattern). |
+| `metrics` | [\[\]MetricSpec](#metrics) | **required** | Metrics to collect and use for scaling decisions |
+| `behavior` | [Behavior](#behavior) | — | HPA scaling behavior (pass-through to HPA `spec.behavior`) |
+
+### `scrape`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `port` | int | `8080` | Port to scrape metrics from |
+| `path` | string | `/metrics` | HTTP path for the metrics endpoint |
+| `interval` | duration | `15s` | How often to scrape each pod |
+| `timeout` | duration | `1s` | Per-pod scrape timeout |
+| `scheme` | string | `http` | `http` or `https` |
+| `evaluationPeriod` | duration | `60s` | Sliding window over which samples are aggregated |
+| `aggregationType` | string | `avg` | `avg`, `max`, `min`, `median`, `last` |
+| `tls.insecureSkipVerify` | bool | `false` | Skip TLS certificate verification (only applies when `scheme: https`) |
+
+### `targetRef`
+
+Used by both `scaleTargetRef` and `scrapeTargetRef`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `apiVersion` | string | `apps/v1` | API version of the target resource |
+| `kind` | string | **required** | `Deployment`, `StatefulSet`, etc. |
+| `name` | string | **required** | Name of the target resource |
+
+### `metrics[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `metricName` | string | **required** | Prometheus metric name to scrape |
+| `type` | string | `AverageValue` | `AverageValue` (divided by replica count) or `Value` (raw) |
+| `targetValue` | string | **required** | Scaling threshold |
+| `aggregationType` | string | *(from scrape)* | Per-metric aggregation override |
+| `evaluationPeriod` | duration | *(from scrape)* | Per-metric evaluation window override |
+| `labelSelector` | [LabelSelector](#labelselector) | — | Filter scraped samples by Prometheus labels |
+
+### `labelSelector`
+
+| Field | Type | Description |
+|---|---|---|
+| `matchLabels` | map[string]string | Key-value pairs, AND'd together |
+| `matchExpressions[]` | list | Expression-based requirements, AND'd together |
+| `matchExpressions[].key` | string | Label key |
+| `matchExpressions[].operator` | string | `In`, `NotIn`, `Exists`, `DoesNotExist` |
+| `matchExpressions[].values` | []string | Required for `In`/`NotIn` |
+
+### `behavior`
+
+Pass-through to the [HPA behavior spec](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#configurable-scaling-behavior).
+
+| Field | Type | Description |
+|---|---|---|
+| `scaleUp` | ScalingRules | Rules for scaling up |
+| `scaleDown` | ScalingRules | Rules for scaling down |
+| `scaleUp/scaleDown.stabilizationWindowSeconds` | int | Seconds to look back for flapping prevention |
+| `scaleUp/scaleDown.selectPolicy` | string | `Min`, `Max`, or `Disabled` |
+| `scaleUp/scaleDown.policies[]` | list | Scaling policies |
+| `scaleUp/scaleDown.policies[].type` | string | `Pods` or `Percent` |
+| `scaleUp/scaleDown.policies[].value` | int | Number of pods or percentage |
+| `scaleUp/scaleDown.policies[].periodSeconds` | int | Time window for the policy |
 
 ## Local Development
 
 Requires [k3d](https://k3d.io/).
 
 ```bash
-make localdev
-make run
+make localdev          # create k3d cluster + install controller
+make run               # run controller in dev pod
 ```
+
+### Example
+
+A dummy-metrics service and EPA resource are provided for testing. In a separate terminal from the running controller:
+
+```bash
+make localdev-examples
+```
+
+This deploys a `dummy-metrics` pod that exposes a configurable `queue_depth` metric on `/metrics`, and an `ExternalPodAutoscaler` that scrapes it and scales the dummy-metrics deployment between 1 and 10 replicas.
+
+The metric value is driven by a ConfigMap. To simulate load and trigger scaling:
+
+```bash
+kubectl patch configmap dummy-metrics-value -n epa-system -p '{"data":{"value":"50"}}'
+```
+
+Set the value back to `"0"` to scale down.
 
 ## Building
 

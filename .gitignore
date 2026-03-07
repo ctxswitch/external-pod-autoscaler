@@ -6,3 +6,7 @@
 # IDE
 .idea/
 .claude/
+
+# Helm
+charts/*/charts/
+charts/*/*.lock

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: external-pod-autoscaler
+description: A Kubernetes controller that autoscales pods based on externally scraped metrics
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: ctxswitch
+    url: https://github.com/ctxswitch
+sources:
+  - https://github.com/ctxswitch/external-pod-autoscaler
+dependencies:
+  - name: cert-manager
+    version: "v1.17.2"
+    repository: oci://quay.io/jetstack/charts
+    condition: cert-manager.enabled

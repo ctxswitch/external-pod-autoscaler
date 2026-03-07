@@ -1,9 +1,10 @@
-ENV ?= dev
 LOCALDEV_CLUSTER ?= epa
+RELEASE_NAME ?= epa
+RELEASE_NAMESPACE ?= epa-system
 VERSION ?= $(shell git describe --tags --always --dirty)
 
 KUBECTL ?= kubectl
-KUSTOMIZE ?= kustomize
+HELM ?= helm
 CARGO ?= cargo
 
 DUMMY_METRICS_IMAGE ?= ctxsh/dummy-metrics
@@ -56,22 +57,18 @@ localdev-cluster:
 	@if k3d cluster get $(LOCALDEV_CLUSTER) --no-headers >/dev/null 2>&1; \
 		then echo "Cluster '$(LOCALDEV_CLUSTER)' already exists"; \
 		else echo "Creating k3d cluster '$(LOCALDEV_CLUSTER)'..." && \
-		k3d cluster create --config config/k3d/config.yaml --volume $(PWD):/app; \
+		k3d cluster create --config cluster.yaml --volume $(PWD):/app; \
 	fi
 
-.PHONY: localdev-cert-manager
-localdev-cert-manager:
-	@echo "Installing cert-manager..."
-	@$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
-	@echo "Waiting for cert-manager to be ready..."
-	@$(KUBECTL) wait --for=condition=available --timeout=120s deploy -l app.kubernetes.io/instance=cert-manager -n cert-manager
-
 .PHONY: localdev-install
-localdev-install: localdev-cert-manager
+localdev-install:
 	@echo "Installing EPA controller..."
-	@$(KUSTOMIZE) build config/epa/overlays/$(ENV) | $(KUBECTL) apply -f -
+	@$(HELM) dependency build charts/external-pod-autoscaler
+	@$(HELM) upgrade --install $(RELEASE_NAME) charts/external-pod-autoscaler \
+		--namespace $(RELEASE_NAMESPACE) --create-namespace \
+		-f charts/external-pod-autoscaler/values.localdev.yaml
 	@echo "Waiting for EPA controller to be ready..."
-	@$(KUBECTL) wait --for=condition=available --timeout=120s deploy/epa-controller -n epa-system
+	@$(KUBECTL) wait --for=condition=available --timeout=120s deploy/$(RELEASE_NAME)-external-pod-autoscaler -n $(RELEASE_NAMESPACE)
 
 .PHONY: localdev-clean
 localdev-clean:
@@ -81,29 +78,37 @@ localdev-clean:
 .PHONY: localdev-restart
 localdev-restart: localdev-clean localdev
 
+.PHONY: localdev-examples
+localdev-examples:
+	@echo "Applying examples..."
+	@$(KUBECTL) apply -f examples/dummy-metrics.yaml
+	@$(KUBECTL) apply -f examples/epa.yaml
+
 .PHONY: localdev-uninstall
 localdev-uninstall:
 	@echo "Uninstalling EPA controller..."
-	@$(KUBECTL) delete -k config/epa/overlays/$(ENV)
+	@$(HELM) uninstall $(RELEASE_NAME) --namespace $(RELEASE_NAMESPACE)
+	@$(KUBECTL) delete -f examples/epa.yaml --ignore-not-found
+	@$(KUBECTL) delete -f examples/dummy-metrics.yaml --ignore-not-found
 
 ###
 ### Dev pod operations
 ###
 .PHONY: run
 run:
-	$(eval POD := $(shell kubectl get pods -n epa-system -l app=epa-controller -o=custom-columns=:metadata.name --no-headers))
+	$(eval POD := $(shell $(KUBECTL) get pods -n $(RELEASE_NAMESPACE) -l app.kubernetes.io/name=external-pod-autoscaler -o=custom-columns=:metadata.name --no-headers))
 	@echo "Running controller in pod $(POD)..."
-	@$(KUBECTL) exec -n epa-system -it pod/$(POD) -- bash -c "cargo run --bin external-pod-autoscaler"
+	@$(KUBECTL) exec -n $(RELEASE_NAMESPACE) -it pod/$(POD) -- bash -c "cargo run --bin external-pod-autoscaler"
 
 .PHONY: exec
 exec:
-	$(eval POD := $(shell kubectl get pods -n epa-system -l app=epa-controller -o=custom-columns=:metadata.name --no-headers))
+	$(eval POD := $(shell $(KUBECTL) get pods -n $(RELEASE_NAMESPACE) -l app.kubernetes.io/name=external-pod-autoscaler -o=custom-columns=:metadata.name --no-headers))
 	@echo "Connecting to pod $(POD)..."
-	@$(KUBECTL) exec -n epa-system -it pod/$(POD) -- bash
+	@$(KUBECTL) exec -n $(RELEASE_NAMESPACE) -it pod/$(POD) -- bash
 
 .PHONY: logs
 logs:
-	@$(KUBECTL) logs -n epa-system -l app=epa-controller -f
+	@$(KUBECTL) logs -n $(RELEASE_NAMESPACE) -l app.kubernetes.io/name=external-pod-autoscaler -f
 
 ###
 ### Cluster management
@@ -144,8 +149,8 @@ help:
 	@echo "Local development:"
 	@echo "  localdev           - Create k3d cluster + install controller"
 	@echo "  localdev-cluster   - Create k3d cluster only"
-	@echo "  localdev-cert-manager - Install cert-manager"
-	@echo "  localdev-install   - Install controller in cluster"
+	@echo "  localdev-install   - Install controller via Helm"
+	@echo "  localdev-examples  - Apply example resources"
 	@echo "  localdev-uninstall - Uninstall controller"
 	@echo "  localdev-clean     - Delete k3d cluster"
 	@echo "  localdev-restart   - Delete and recreate cluster"
@@ -162,4 +167,5 @@ help:
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  LOCALDEV_CLUSTER   - Cluster name (default: epa)"
-	@echo "  ENV                - Environment (default: dev)"
+	@echo "  RELEASE_NAME       - Helm release name (default: epa)"
+	@echo "  RELEASE_NAMESPACE  - Helm release namespace (default: epa-system)"

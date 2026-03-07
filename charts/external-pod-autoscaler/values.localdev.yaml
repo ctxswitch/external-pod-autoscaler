@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  repository: rust
+  tag: latest
+  pullPolicy: IfNotPresent
+
+controller:
+  command:
+    - sleep
+    - infinity
+  workingDir: /usr/src/app
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    runAsNonRoot: false
+
+cert-manager:
+  enabled: true
+  crds:
+    enabled: true
+
+service:
+  type: NodePort
+  webhookNodePort: 30443
+
+nodeSelector:
+  kubernetes.io/hostname: k3d-epa-agent-0
+
+extraVolumes:
+  - name: app
+    hostPath:
+      path: /app
+  - name: cargo-cache
+    emptyDir: {}
+  - name: target-cache
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: app
+    mountPath: /usr/src/app
+  - name: cargo-cache
+    mountPath: /usr/local/cargo/registry
+  - name: target-cache
+    mountPath: /usr/src/app/target

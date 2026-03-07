@@ -1,0 +1,109 @@
+{{- if .Values.controller.enableWebhooks -}}
+{{- if index .Values "cert-manager" "enabled" }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "epa.fullname" . }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "epa.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "epa.fullname" . }}-webhook-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "epa.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
+spec:
+  dnsNames:
+    - {{ include "epa.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+    - {{ include "epa.fullname" . }}-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: {{ include "epa.fullname" . }}-selfsigned
+  secretName: {{ include "epa.fullname" . }}-webhook-cert
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "epa.fullname" . }}-validating
+  labels:
+    {{- include "epa.labels" . | nindent 4 }}
+  {{- if index .Values "cert-manager" "enabled" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "epa.fullname" . }}-webhook-cert
+  {{- end }}
+webhooks:
+  - name: validate.externalpodautoscaler.ctx.sh
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: {{ include "epa.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-ctx-sh-v1beta1-externalpodautoscaler
+        port: {{ .Values.service.webhookPort }}
+    failurePolicy: Fail
+    matchPolicy: Exact
+    rules:
+      - apiGroups:
+          - ctx.sh
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - epas
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "epa.fullname" . }}-mutating
+  labels:
+    {{- include "epa.labels" . | nindent 4 }}
+  {{- if index .Values "cert-manager" "enabled" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "epa.fullname" . }}-webhook-cert
+  {{- end }}
+webhooks:
+  - name: mutate.externalpodautoscaler.ctx.sh
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: {{ include "epa.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-ctx-sh-v1beta1-externalpodautoscaler
+        port: {{ .Values.service.webhookPort }}
+    failurePolicy: Fail
+    matchPolicy: Exact
+    rules:
+      - apiGroups:
+          - ctx.sh
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - epas
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
+{{- end }}

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
     namespaced,
     status = "ExternalPodAutoscalerStatus",
     shortname = "epa",
+    plural = "epas",
     printcolumn = r#"{"name":"Scale Target", "type":"string", "jsonPath":".spec.scaleTargetRef.name"}"#,
     printcolumn = r#"{"name":"Min", "type":"integer", "jsonPath":".spec.minReplicas"}"#,
     printcolumn = r#"{"name":"Max", "type":"integer", "jsonPath":".spec.maxReplicas"}"#,
