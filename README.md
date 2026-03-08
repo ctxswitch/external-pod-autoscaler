@@ -141,7 +141,7 @@ Pass-through to the [HPA behavior spec](https://kubernetes.io/docs/tasks/run-app
 Requires [k3d](https://k3d.io/).
 
 ```bash
-make localdev          # create k3d cluster + install controller
+make localdev          # create k3d cluster + dev pod
 make run               # run controller in dev pod
 ```
 
