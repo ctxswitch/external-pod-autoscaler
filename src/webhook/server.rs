@@ -5,6 +5,7 @@ use crate::store::MetricsStore;
 use anyhow::{Context, Result};
 use axum::{Router, routing::get, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -126,7 +127,7 @@ impl WebhookServer {
 
         info!(addr = %addr, "Webhook server listening with TLS");
 
-        axum_server::bind_rustls(addr.parse()?, tls_config)
+        axum_server::bind_rustls(addr.parse::<SocketAddr>()?, tls_config)
             .serve(app.into_make_service())
             .await?;
 

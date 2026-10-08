@@ -75,7 +75,11 @@ pub async fn get_external_metric(
                     warn!(epa_key = %epa_key, "No active replicas to handle request");
                     telemetry
                         .api_requests
-                        .with_label_values(&[&epa_namespace, &actual_metric_name, "no_replicas"])
+                        .with_label_values(&[
+                            epa_namespace.as_str(),
+                            &actual_metric_name,
+                            "no_replicas",
+                        ])
                         .inc();
                     break 'forward None;
                 }
@@ -141,7 +145,11 @@ pub async fn get_external_metric(
 
                     telemetry
                         .api_requests
-                        .with_label_values(&[&epa_namespace, &actual_metric_name, "owner_down"])
+                        .with_label_values(&[
+                            epa_namespace.as_str(),
+                            &actual_metric_name,
+                            "owner_down",
+                        ])
                         .inc();
 
                     break 'forward None;
@@ -183,7 +191,7 @@ pub async fn get_external_metric(
                             telemetry
                                 .api_requests
                                 .with_label_values(&[
-                                    &epa_namespace,
+                                    epa_namespace.as_str(),
                                     &actual_metric_name,
                                     forward_label,
                                 ])
@@ -202,7 +210,7 @@ pub async fn get_external_metric(
                             telemetry
                                 .api_requests
                                 .with_label_values(&[
-                                    &epa_namespace,
+                                    epa_namespace.as_str(),
                                     &actual_metric_name,
                                     "forward_failed",
                                 ])
@@ -222,7 +230,11 @@ pub async fn get_external_metric(
 
                     telemetry
                         .api_requests
-                        .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
+                        .with_label_values(&[
+                            epa_namespace.as_str(),
+                            &actual_metric_name,
+                            "forward_failed",
+                        ])
                         .inc();
 
                     break 'forward None;
@@ -237,7 +249,11 @@ pub async fn get_external_metric(
 
                     telemetry
                         .api_requests
-                        .with_label_values(&[&epa_namespace, &actual_metric_name, "forward_failed"])
+                        .with_label_values(&[
+                            epa_namespace.as_str(),
+                            &actual_metric_name,
+                            "forward_failed",
+                        ])
                         .inc();
 
                     break 'forward None;
@@ -288,12 +304,12 @@ pub async fn get_external_metric(
 
         telemetry
             .cache_hits
-            .with_label_values(&[&epa_namespace, &actual_metric_name, "hit"])
+            .with_label_values(&[epa_namespace.as_str(), &actual_metric_name, "hit"])
             .inc();
 
         telemetry
             .api_requests
-            .with_label_values(&[&epa_namespace, &actual_metric_name, "success"])
+            .with_label_values(&[epa_namespace.as_str(), &actual_metric_name, "success"])
             .inc();
 
         // Safely convert f64 to i64 with overflow protection
@@ -325,7 +341,7 @@ pub async fn get_external_metric(
     // Cache miss - compute aggregation
     telemetry
         .cache_hits
-        .with_label_values(&[&epa_namespace, &actual_metric_name, "miss"])
+        .with_label_values(&[epa_namespace.as_str(), &actual_metric_name, "miss"])
         .inc();
 
     // Get windows from store
@@ -344,7 +360,7 @@ pub async fn get_external_metric(
 
         telemetry
             .api_requests
-            .with_label_values(&[&epa_namespace, &actual_metric_name, "not_found"])
+            .with_label_values(&[epa_namespace.as_str(), &actual_metric_name, "not_found"])
             .inc();
 
         return Err(ApiError::MetricUnavailable(format!(
@@ -373,7 +389,11 @@ pub async fn get_external_metric(
 
         telemetry
             .api_requests
-            .with_label_values(&[&epa_namespace, &actual_metric_name, "no_contributors"])
+            .with_label_values(&[
+                epa_namespace.as_str(),
+                &actual_metric_name,
+                "no_contributors",
+            ])
             .inc();
 
         return Err(ApiError::MetricUnavailable(format!(
@@ -404,7 +424,7 @@ pub async fn get_external_metric(
     // Record success
     telemetry
         .api_requests
-        .with_label_values(&[&epa_namespace, &actual_metric_name, "success"])
+        .with_label_values(&[epa_namespace.as_str(), &actual_metric_name, "success"])
         .inc();
 
     telemetry
