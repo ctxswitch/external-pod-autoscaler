@@ -1,5 +1,5 @@
 mod admission;
-mod metrics;
+pub(crate) mod metrics;
 mod server;
 
 #[cfg(test)]

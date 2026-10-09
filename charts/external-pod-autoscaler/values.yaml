@@ -22,6 +22,24 @@ controller:
   enableWebhooks: true
   scraperWorkers: 20
   securityContext: {}
+  startupProbe:
+    httpGet:
+      path: /readyz
+      port: metrics
+    periodSeconds: 2
+    failureThreshold: 60
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: metrics
+    periodSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: metrics
+    periodSeconds: 5
+    failureThreshold: 3
 
 service:
   type: ClusterIP

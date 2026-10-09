@@ -1,5 +1,6 @@
 mod apis;
 mod controller;
+mod health;
 mod membership;
 mod scraper;
 mod store;
@@ -75,6 +76,19 @@ async fn main() -> Result<()> {
 
     info!("Webhook server will listen on port {}", webhook_port);
 
+    let metrics_port: u16 = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(9090);
+
+    // Bind the health listener before registration so /healthz answers and
+    // /readyz reports 503 while the replica starts up.
+    let readiness = Arc::new(health::Readiness::default());
+    let health_listener = tokio::net::TcpListener::bind(("0.0.0.0", metrics_port))
+        .await
+        .with_context(|| format!("Failed to bind health server on port {metrics_port}"))?;
+    let mut health_handle = tokio::spawn(health::serve(health_listener, readiness.clone()));
+
     // Initialize membership manager for distributed scraping
     let membership = Arc::new(MembershipManager::new(
         client.clone(),
@@ -92,10 +106,12 @@ async fn main() -> Result<()> {
         .register_and_renew()
         .await
         .context("Failed to register initial membership lease")?;
+    readiness.mark_lease_registered();
     membership
         .update_active_replicas()
         .await
         .context("Failed to populate initial active replicas")?;
+    readiness.mark_membership_populated();
 
     let epa_ownership = Arc::new(EpaOwnership::new(membership.clone()));
 
@@ -148,6 +164,7 @@ async fn main() -> Result<()> {
         epa_ownership,
         membership.clone(),
         webhook_port,
+        readiness,
     ));
     let mut membership_handle = tokio::spawn(membership.clone().run());
 
@@ -168,6 +185,10 @@ async fn main() -> Result<()> {
         result = &mut membership_handle => {
             result.context("Membership task panicked")??;
             info!("Membership manager stopped");
+        },
+        result = &mut health_handle => {
+            result.context("Health server task panicked")??;
+            info!("Health server stopped");
         },
         _ = sigterm.recv() => {
             info!("Received SIGTERM, starting drain sequence");
@@ -213,6 +234,7 @@ async fn main() -> Result<()> {
     scraper_handle.abort();
     webhook_handle.abort();
     membership_handle.abort();
+    health_handle.abort();
 
     Ok(())
 }
@@ -223,7 +245,9 @@ async fn run_webhook_server(
     epa_ownership: Arc<EpaOwnership>,
     membership: Arc<MembershipManager>,
     port: u16,
+    readiness: Arc<health::Readiness>,
 ) -> Result<()> {
-    let server = webhook::WebhookServer::new(metrics_store, epa_ownership, membership, port)?;
+    let server =
+        webhook::WebhookServer::new(metrics_store, epa_ownership, membership, port, readiness)?;
     server.run().await
 }

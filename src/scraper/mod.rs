@@ -9,7 +9,7 @@ mod scheduler;
 #[cfg(test)]
 mod scraper_integration_test;
 mod service;
-mod telemetry;
+pub(crate) mod telemetry;
 mod worker;
 #[cfg(test)]
 mod worker_test;

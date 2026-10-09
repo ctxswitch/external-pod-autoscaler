@@ -1,4 +1,5 @@
 use super::{admission, metrics};
+use crate::health::Readiness;
 use crate::membership::manager::MembershipManager;
 use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
@@ -37,6 +38,7 @@ pub struct WebhookServer {
     state: AppState,
     port: u16,
     enable_webhooks: bool,
+    readiness: Arc<Readiness>,
 }
 
 impl WebhookServer {
@@ -51,11 +53,13 @@ impl WebhookServer {
     /// * `epa_ownership` - EPA ownership coordinator for distributed scraping
     /// * `membership` - Membership manager for replica discovery
     /// * `port` - Port to listen on (typically 8443 for webhooks)
+    /// * `readiness` - Marked ready for TLS once the certificate is loaded
     pub fn new(
         metrics_store: MetricsStore,
         epa_ownership: Arc<EpaOwnership>,
         membership: Arc<MembershipManager>,
         port: u16,
+        readiness: Arc<Readiness>,
     ) -> Result<Self> {
         metrics::telemetry::Telemetry::init();
 
@@ -88,6 +92,7 @@ impl WebhookServer {
             },
             port,
             enable_webhooks,
+            readiness,
         })
     }
 
@@ -122,7 +127,15 @@ impl WebhookServer {
 
         let app = build_router(self.state, self.enable_webhooks);
 
-        serve_tls(addr.parse()?, &cert_path, &key_path, app, Handle::new()).await
+        serve_tls(
+            addr.parse()?,
+            &cert_path,
+            &key_path,
+            app,
+            Handle::new(),
+            &self.readiness,
+        )
+        .await
     }
 }
 
@@ -131,17 +144,20 @@ impl WebhookServer {
 ///
 /// Separated from `WebhookServer::run` to allow testing TLS loading and the
 /// bind without the fixed certificate paths. `handle` reports the bound
-/// address and shuts the server down.
+/// address and shuts the server down. `readiness` is marked TLS-loaded once
+/// the certificate and key parse, before the server starts accepting.
 pub(crate) async fn serve_tls(
     addr: SocketAddr,
     cert_path: &Path,
     key_path: &Path,
     app: Router,
     handle: Handle<SocketAddr>,
+    readiness: &Readiness,
 ) -> Result<()> {
     let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
         .await
         .context("Failed to load TLS certificates for Webhook server")?;
+    readiness.mark_tls_loaded();
 
     info!(addr = %addr, "Webhook server listening with TLS");
 
