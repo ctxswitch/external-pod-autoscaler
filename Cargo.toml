@@ -26,19 +26,18 @@ reqwest = { version = "0.13", features = ["json"] }
 
 # Web server
 axum = "0.7"
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 
 # TLS
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
-rustls-pemfile = "2.0"
 
 # Logging and tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 
 # Error handling
 anyhow = "1.0"
@@ -61,3 +60,4 @@ hyper = "1"
 http = "1"
 serial_test = "3"
 serde_yaml = "0.9"
+rcgen = "0.14"
