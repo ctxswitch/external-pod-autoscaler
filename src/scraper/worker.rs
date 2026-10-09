@@ -193,13 +193,12 @@ impl Worker {
 
         // Store each configured metric in the sliding window
         for metric_spec in &epa.spec.metrics {
-            // Find matching Prometheus metric(s)
-            let matching_metrics: Vec<_> = parsed_metrics
+            let named: Vec<_> = parsed_metrics
                 .iter()
                 .filter(|m| m.name == metric_spec.metric_name)
                 .collect();
 
-            if matching_metrics.is_empty() {
+            if named.is_empty() {
                 warn!(
                     pod = %pod_name,
                     metric = %metric_spec.metric_name,
@@ -208,38 +207,58 @@ impl Worker {
                 continue;
             }
 
-            // For each matching metric (could have different labels), store a sample
-            for prom_metric in matching_metrics {
-                // Filter by label selector if specified
-                if let Some(ref label_selector) = metric_spec.label_selector
-                    && !matches_label_selector(&prom_metric.labels, label_selector)
-                {
-                    continue;
-                }
+            let matched: Vec<_> = named
+                .into_iter()
+                .filter(|m| {
+                    metric_spec
+                        .label_selector
+                        .as_ref()
+                        .is_none_or(|selector| matches_label_selector(&m.labels, selector))
+                })
+                .collect();
 
-                let sample = LabeledSample {
-                    value: prom_metric.value,
-                    scraped_at,
-                    success: true,
-                    metric_type: prom_metric.metric_type,
-                };
+            let Some(first) = matched.first() else {
+                continue;
+            };
 
-                let key = SampleKey::new(
-                    namespace.clone(),
-                    epa_name.to_string(),
-                    metric_spec.metric_name.clone(),
-                    pod_name.clone(),
-                );
-
-                store.push_sample(key, sample, max_samples).await;
-
-                debug!(
-                    pod = %pod_name,
+            if matched.len() > 1
+                && metric_spec.label_selector.is_none()
+                && store.first_multi_series(&namespace, epa_name, &metric_spec.metric_name)
+            {
+                warn!(
+                    epa = %epa_name,
+                    namespace = %namespace,
                     metric = %metric_spec.metric_name,
-                    value = prom_metric.value,
-                    "Stored sample in sliding window"
+                    series = matched.len(),
+                    "Metric has multiple series; values are summed, set labelSelector to pick one series"
                 );
             }
+
+            let value: f64 = matched.iter().map(|m| m.value).sum();
+            let sample = LabeledSample {
+                value,
+                scraped_at,
+                success: true,
+                // Series of one family share a TYPE, so the first one's type applies to the sum.
+                metric_type: first.metric_type,
+            };
+
+            let key = SampleKey::new(
+                namespace.clone(),
+                epa_name.to_string(),
+                metric_spec.metric_name.clone(),
+                pod_name.clone(),
+            );
+
+            store.push_sample(key, sample, max_samples).await;
+
+            debug!(
+                pod = %pod_name,
+                metric = %metric_spec.metric_name,
+                value,
+                series = matched.len(),
+                "Stored sample in sliding window"
+            );
         }
 
         // Record scrape duration

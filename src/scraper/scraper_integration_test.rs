@@ -195,6 +195,109 @@ async fn scrape_with_labels_filtered() {
     assert_eq!(window.samples[0].value, 42.0);
 }
 
+// Several series of one gauge are summed into a single sample.
+#[tokio::test]
+async fn scrape_multi_series_gauge_summed() {
+    let server = MockServer::start().await;
+    let port = server.address().port();
+
+    Mock::given(method("GET"))
+        .and(path("/metrics"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "# TYPE queue_depth gauge\nqueue_depth{priority=\"high\"} 42\nqueue_depth{priority=\"low\"} 10\n",
+        ))
+        .mount(&server)
+        .await;
+
+    let epa = make_scrape_epa("test-epa", "default", port);
+    let pod = make_scrape_pod("pod-1", "default", "127.0.0.1");
+    let store = MetricsStore::new();
+    let client = reqwest::Client::new();
+
+    let result = Worker::scrape_pod_static(&client, &epa, &pod, &store, 10).await;
+    assert!(result.is_ok());
+
+    assert!(!store.first_multi_series("default", "test-epa", "queue_depth"));
+
+    let windows = store.get_windows("default", "test-epa", "queue_depth");
+    assert_eq!(windows.len(), 1);
+
+    let window = windows[0].1.read().await;
+    assert_eq!(window.samples.len(), 1);
+    assert_eq!(window.samples[0].value, 52.0);
+    assert_eq!(window.samples[0].metric_type, MetricType::Gauge);
+}
+
+// Several series of one counter are summed into a single counter sample.
+#[tokio::test]
+async fn scrape_multi_series_counter_summed() {
+    let server = MockServer::start().await;
+    let port = server.address().port();
+
+    Mock::given(method("GET"))
+        .and(path("/metrics"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "# TYPE http_requests_total counter\nhttp_requests_total{code=\"200\"} 100\nhttp_requests_total{code=\"500\"} 5\n",
+        ))
+        .mount(&server)
+        .await;
+
+    let mut epa = make_scrape_epa("test-epa", "default", port);
+    epa.spec.metrics = vec![MetricSpec {
+        metric_name: "http_requests_total".to_string(),
+        type_: MetricTargetType::AverageValue,
+        target_value: "100".to_string(),
+        aggregation_type: None,
+        evaluation_period: None,
+        label_selector: None,
+    }];
+    let pod = make_scrape_pod("pod-1", "default", "127.0.0.1");
+    let store = MetricsStore::new();
+    let client = reqwest::Client::new();
+
+    let result = Worker::scrape_pod_static(&client, &epa, &pod, &store, 10).await;
+    assert!(result.is_ok());
+
+    let windows = store.get_windows("default", "test-epa", "http_requests_total");
+    assert_eq!(windows.len(), 1);
+
+    let window = windows[0].1.read().await;
+    assert_eq!(window.samples.len(), 1);
+    assert_eq!(window.samples[0].value, 105.0);
+    assert_eq!(window.samples[0].metric_type, MetricType::Counter);
+}
+
+// Each scrape adds one sample per pod regardless of series count.
+#[tokio::test]
+async fn scrape_multi_series_one_sample_per_scrape() {
+    let server = MockServer::start().await;
+    let port = server.address().port();
+
+    Mock::given(method("GET"))
+        .and(path("/metrics"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "# TYPE queue_depth gauge\nqueue_depth{priority=\"high\"} 42\nqueue_depth{priority=\"low\"} 10\n",
+        ))
+        .mount(&server)
+        .await;
+
+    let epa = make_scrape_epa("test-epa", "default", port);
+    let pod = make_scrape_pod("pod-1", "default", "127.0.0.1");
+    let store = MetricsStore::new();
+    let client = reqwest::Client::new();
+
+    for _ in 0..2 {
+        let result = Worker::scrape_pod_static(&client, &epa, &pod, &store, 10).await;
+        assert!(result.is_ok());
+    }
+
+    let windows = store.get_windows("default", "test-epa", "queue_depth");
+    assert_eq!(windows.len(), 1);
+
+    let window = windows[0].1.read().await;
+    assert_eq!(window.samples.len(), 2);
+}
+
 // Mock delays beyond EPA timeout — should return an error.
 #[tokio::test]
 async fn scrape_timeout_returns_error() {

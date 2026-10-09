@@ -1,7 +1,7 @@
 use super::MetricsStore;
 use super::types::{CacheKey, CachedAggregation, LabeledSample, SampleKey, ScrapeStats};
 use super::window::MetricWindow;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +15,7 @@ impl MetricsStore {
             cache: Arc::new(DashMap::new()),
             configs: Arc::new(DashMap::new()),
             scrape_stats: Arc::new(DashMap::new()),
+            multi_series_warned: Arc::new(DashSet::new()),
         }
     }
 
@@ -245,7 +246,28 @@ impl MetricsStore {
         before - self.windows.len()
     }
 
-    /// Removes all windows, cache entries, and configs for a specific EPA.
+    /// Records that a multi-series warning is being raised for an EPA and metric.
+    ///
+    /// Returns `true` only the first time a given (namespace, EPA, metric) is seen,
+    /// so callers can log the warning once instead of on every scrape. The record is
+    /// dropped by `remove_epa_windows`.
+    ///
+    /// # Arguments
+    ///
+    /// * `namespace` - Kubernetes namespace
+    /// * `epa_name` - ExternalPodAutoscaler name
+    /// * `metric_name` - Metric whose scrape returned several series
+    pub fn first_multi_series(&self, namespace: &str, epa_name: &str, metric_name: &str) -> bool {
+        let key = CacheKey::new(
+            namespace.to_string(),
+            epa_name.to_string(),
+            metric_name.to_string(),
+        );
+        self.multi_series_warned.insert(key)
+    }
+
+    /// Removes all windows, cache entries, configs, and multi-series warning records
+    /// for a specific EPA.
     ///
     /// Called when an EPA is deleted to clean up all associated metric data.
     ///
@@ -265,6 +287,9 @@ impl MetricsStore {
 
         self.configs
             .retain(|key, _| !(key.namespace == namespace && key.epa_name == epa_name));
+
+        self.multi_series_warned
+            .retain(|key| !(key.namespace == namespace && key.epa_name == epa_name));
 
         let stats_key = format!("{}/{}", namespace, epa_name);
         self.scrape_stats.remove(&stats_key);
@@ -328,6 +353,7 @@ impl Clone for MetricsStore {
             cache: self.cache.clone(),
             configs: self.configs.clone(),
             scrape_stats: self.scrape_stats.clone(),
+            multi_series_warned: self.multi_series_warned.clone(),
         }
     }
 }
