@@ -13,11 +13,13 @@ on:
           - major
 
 permissions:
+  actions: write
   contents: write
+  pull-requests: write
 
 jobs:
   bump:
-    name: Bump & Tag
+    name: Bump & Open PR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,11 +55,22 @@ jobs:
           sed -i "s/^version:.*/version: ${{ steps.version.outputs.new }}/" charts/external-pod-autoscaler/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.new }}\"/" charts/external-pod-autoscaler/Chart.yaml
 
-      - name: Commit and tag
+      - name: Commit and open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          branch="release/v${{ steps.version.outputs.new }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch --create "$branch"
           git add Cargo.toml Cargo.lock charts/external-pod-autoscaler/Chart.yaml
           git commit -m "release: v${{ steps.version.outputs.new }}"
-          git tag "v${{ steps.version.outputs.new }}"
-          git push origin main --tags
+          git push --set-upstream origin "$branch"
+
+          pr_url=$(gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "release: v${{ steps.version.outputs.new }}" \
+            --body "Prepare the v${{ steps.version.outputs.new }} release. CI was dispatched explicitly because pull requests created with GITHUB_TOKEN do not emit another workflow event.")
+          gh workflow run ci.yaml --ref "$branch"
+          echo "Created $pr_url" >> "$GITHUB_STEP_SUMMARY"

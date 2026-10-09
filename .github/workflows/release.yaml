@@ -2,10 +2,8 @@ name: Release
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Bump Version"]
-    types:
-      - completed
+  push:
+    branches: [main]
 
 permissions:
   contents: write
@@ -14,37 +12,54 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   resolve-tag:
     name: Resolve Tag
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      release: ${{ steps.tag.outputs.release }}
+      source_ref: ${{ steps.tag.outputs.source_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get latest tag
+      - name: Resolve release tag
         id: tag
         run: |
-          tag=$(git tag --sort=-v:refname | grep '^v' | head -1)
-          if [ -z "$tag" ]; then
-            echo "::error::No version tag found"
-            exit 1
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          tag="v${version}"
+
+          if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            if [[ "${{ github.event_name }}" == "push" ]]; then
+              echo "Tag $tag already exists; there is nothing to release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "release=true" >> "$GITHUB_OUTPUT"
+              echo "source_ref=$tag" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "source_ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Resolved tag: $tag"
 
   ci:
     name: CI
     needs: [resolve-tag]
+    if: needs.resolve-tag.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.source_ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -56,11 +71,12 @@ jobs:
   docker:
     name: Docker
     needs: [resolve-tag, ci]
+    if: needs.resolve-tag.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.source_ref }}
 
       - uses: docker/login-action@v3
         with:
@@ -84,11 +100,12 @@ jobs:
   helm:
     name: Helm Chart
     needs: [resolve-tag, docker]
+    if: needs.resolve-tag.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.source_ref }}
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -116,27 +133,32 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "release chart ${{ needs.resolve-tag.outputs.tag }}"
+          if ! git diff --cached --quiet; then
+            git commit -m "release chart ${{ needs.resolve-tag.outputs.tag }}"
+          fi
           git push
 
   release:
     name: GitHub Release
     needs: [resolve-tag, docker, helm]
+    if: needs.resolve-tag.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.source_ref }}
           fetch-depth: 0
 
       - name: Generate changelog
         id: changelog
         run: |
-          prev_tag=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          tag='${{ needs.resolve-tag.outputs.tag }}'
+          source_ref='${{ needs.resolve-tag.outputs.source_ref }}'
+          prev_tag=$(git tag --sort=-v:refname | grep '^v' | grep -Fvx "$tag" | sed -n '1p')
           if [ -z "$prev_tag" ]; then
-            log=$(git log --pretty=format:"- %s (%h)" ${{ needs.resolve-tag.outputs.tag }})
+            log=$(git log --pretty=format:"- %s (%h)" "$source_ref")
           else
-            log=$(git log --pretty=format:"- %s (%h)" "${prev_tag}..${{ needs.resolve-tag.outputs.tag }}")
+            log=$(git log --pretty=format:"- %s (%h)" "${prev_tag}..${source_ref}")
           fi
 
           {
@@ -149,6 +171,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          target_commitish: ${{ needs.resolve-tag.outputs.source_ref }}
           generate_release_notes: false
           body: |
             ## Docker Image
