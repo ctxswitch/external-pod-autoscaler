@@ -4,9 +4,10 @@ use crate::membership::ownership::EpaOwnership;
 use crate::store::MetricsStore;
 use anyhow::{Context, Result};
 use axum::{Router, routing::get, routing::post};
+use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -119,20 +120,37 @@ impl WebhookServer {
             "Starting Webhook server with TLS"
         );
 
-        let tls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
-            .await
-            .context("Failed to load TLS certificates for Webhook server")?;
-
         let app = build_router(self.state, self.enable_webhooks);
 
-        info!(addr = %addr, "Webhook server listening with TLS");
-
-        axum_server::bind_rustls(addr.parse::<SocketAddr>()?, tls_config)
-            .serve(app.into_make_service())
-            .await?;
-
-        Ok(())
+        serve_tls(addr.parse()?, &cert_path, &key_path, app, Handle::new()).await
     }
+}
+
+/// Serves `app` over HTTPS on `addr` with the PEM certificate and key at
+/// `cert_path` and `key_path`.
+///
+/// Separated from `WebhookServer::run` to allow testing TLS loading and the
+/// bind without the fixed certificate paths. `handle` reports the bound
+/// address and shuts the server down.
+pub(crate) async fn serve_tls(
+    addr: SocketAddr,
+    cert_path: &Path,
+    key_path: &Path,
+    app: Router,
+    handle: Handle<SocketAddr>,
+) -> Result<()> {
+    let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
+        .await
+        .context("Failed to load TLS certificates for Webhook server")?;
+
+    info!(addr = %addr, "Webhook server listening with TLS");
+
+    axum_server::bind_rustls(addr, tls_config)
+        .handle(handle)
+        .serve(app.into_make_service())
+        .await?;
+
+    Ok(())
 }
 
 /// Builds the axum router with all routes configured.
