@@ -1,10 +1,12 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::{Router, routing::get};
 use axum_server::Handle;
 
 use super::server::serve_tls;
+use crate::health::Readiness;
 
 /// Writes a self-signed certificate for `localhost` and its PKCS#8 key as PEM
 /// files into a directory unique to `name`.
@@ -26,15 +28,18 @@ async fn test_serve_tls_serves_https() {
 
     let app = Router::new().route("/", get(|| async { "ok" }));
     let handle = Handle::new();
+    let readiness = Arc::new(Readiness::default());
     let server = tokio::spawn({
         let handle = handle.clone();
+        let readiness = readiness.clone();
         async move {
             let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-            serve_tls(addr, &cert_path, &key_path, app, handle).await
+            serve_tls(addr, &cert_path, &key_path, app, handle, &readiness).await
         }
     });
 
     let addr = handle.listening().await.expect("server did not bind");
+    assert!(!readiness.pending().contains(&"tls"));
     let body = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
@@ -58,12 +63,14 @@ async fn test_serve_tls_missing_certificate() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let dir = std::env::temp_dir().join(format!("epa-serve-tls-missing-{}", std::process::id()));
 
+    let readiness = Readiness::default();
     let err = serve_tls(
         "127.0.0.1:0".parse().unwrap(),
         &dir.join("tls.crt"),
         &dir.join("tls.key"),
         Router::new(),
         Handle::new(),
+        &readiness,
     )
     .await
     .unwrap_err();
@@ -73,4 +80,5 @@ async fn test_serve_tls_missing_certificate() {
             .contains("Failed to load TLS certificates for Webhook server"),
         "unexpected error: {err:#}"
     );
+    assert!(readiness.pending().contains(&"tls"));
 }

@@ -14,6 +14,9 @@ controller:
     runAsUser: 0
     runAsGroup: 0
     runAsNonRoot: false
+  startupProbe: null
+  livenessProbe: null
+  readinessProbe: null
 
 cert-manager:
   enabled: true

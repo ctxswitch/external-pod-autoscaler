@@ -18,6 +18,9 @@ pub mod apis;
 /// Controller for managing ExternalPodAutoscaler resources
 pub mod controller;
 
+/// Metrics, liveness and readiness listener
+pub mod health;
+
 /// Membership management for distributed replica coordination
 pub mod membership;
 

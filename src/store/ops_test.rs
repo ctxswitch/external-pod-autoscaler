@@ -346,3 +346,18 @@ async fn retain_pod_windows_removes_terminated_pods() {
     let other_windows = store.get_windows("default", "other-epa", "cpu");
     assert_eq!(other_windows.len(), 1);
 }
+
+#[test]
+fn test_first_multi_series_once_per_epa_and_metric() {
+    let store = MetricsStore::new();
+
+    assert!(store.first_multi_series("default", "epa-a", "queue_depth"));
+    assert!(!store.first_multi_series("default", "epa-a", "queue_depth"));
+    assert!(store.first_multi_series("default", "epa-a", "other_metric"));
+    assert!(store.first_multi_series("default", "epa-b", "queue_depth"));
+
+    store.remove_epa_windows("default", "epa-a");
+
+    assert!(store.first_multi_series("default", "epa-a", "queue_depth"));
+    assert!(!store.first_multi_series("default", "epa-b", "queue_depth"));
+}

@@ -7,6 +7,10 @@ use tracing::debug;
 /// Aggregate metric across all pods using two-stage aggregation
 /// Stage 1: Per-pod window aggregation
 /// Stage 2: Cross-pod sum
+///
+/// Returns the sum and the number of pods that contributed a value. A counter
+/// pod with fewer than two successful samples has no rate and is left out of
+/// both the sum and the count.
 pub async fn aggregate_metric(
     windows: &[(String, Arc<RwLock<MetricWindow>>)],
     aggregation_type: &AggregationType,
@@ -34,10 +38,17 @@ pub async fn aggregate_metric(
         let metric_type = successful_samples[0].metric_type;
 
         let pod_value = match metric_type {
-            MetricType::Counter => {
-                // For counters, calculate rate instead of aggregation
-                calculate_rate(&successful_samples)
-            }
+            MetricType::Counter => match calculate_rate(&successful_samples) {
+                Some(rate) => rate,
+                None => {
+                    debug!(
+                        pod = %pod_name,
+                        sample_count = successful_samples.len(),
+                        "Too few counter samples to compute a rate"
+                    );
+                    continue;
+                }
+            },
             MetricType::Gauge => {
                 // For gauges, apply aggregation type
                 aggregate_samples(&successful_samples, aggregation_type)
@@ -67,47 +78,40 @@ pub async fn aggregate_metric(
     (total, per_pod_values.len())
 }
 
-/// Calculate rate for counter metrics
+/// Per-second rate of a counter over the window, or `None` when fewer than two
+/// samples exist.
 ///
-/// Applies rate limiting to prevent unrealistic values during counter resets.
-/// Maximum rate is capped at 1 billion per second to prevent overflow/DoS.
-fn calculate_rate(samples: &[&LabeledSample]) -> f64 {
-    // Maximum allowed rate (1 billion/sec) prevents unrealistic values and overflow
+/// The increase is summed pair by pair; a pair whose value drops is a counter
+/// restart and contributes the new value. Zero elapsed time yields 0. The rate
+/// is capped at 1 billion per second.
+fn calculate_rate(samples: &[&LabeledSample]) -> Option<f64> {
     const MAX_RATE: f64 = 1_000_000_000.0;
 
-    if samples.is_empty() {
-        return 0.0;
-    }
+    let [first, .., last] = samples else {
+        return None;
+    };
 
-    if samples.len() < 2 {
-        // Not enough samples to calculate rate, return current value capped
-        return samples[0].value.min(MAX_RATE);
-    }
-
-    let first = &samples[0];
-    let last = &samples[samples.len() - 1];
-
-    let time_diff = last
+    let elapsed = last
         .scraped_at
         .duration_since(first.scraped_at)
         .as_secs_f64();
 
-    if time_diff == 0.0 {
-        return 0.0;
+    if elapsed == 0.0 {
+        return Some(0.0);
     }
 
-    let delta = last.value - first.value;
+    let increase: f64 = samples
+        .windows(2)
+        .map(|pair| {
+            if pair[1].value >= pair[0].value {
+                pair[1].value - pair[0].value
+            } else {
+                pair[1].value
+            }
+        })
+        .sum();
 
-    let raw_rate = if delta < 0.0 {
-        // Counter was reset, use current value / time
-        last.value / time_diff
-    } else {
-        // Normal counter increase
-        delta / time_diff
-    };
-
-    // Cap rate at maximum to prevent unrealistic values
-    raw_rate.min(MAX_RATE)
+    Some((increase / elapsed).min(MAX_RATE))
 }
 
 /// Aggregate samples using specified aggregation type.

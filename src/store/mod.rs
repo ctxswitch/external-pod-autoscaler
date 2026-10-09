@@ -12,7 +12,7 @@ pub use types::{
 };
 pub use window::MetricWindow;
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -38,4 +38,5 @@ pub struct MetricsStore {
     cache: Arc<DashMap<CacheKey, CachedAggregation>>,
     configs: Arc<DashMap<CacheKey, MetricConfig>>,
     scrape_stats: Arc<DashMap<String, Arc<ScrapeStats>>>,
+    multi_series_warned: Arc<DashSet<CacheKey>>,
 }

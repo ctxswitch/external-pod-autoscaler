@@ -2,6 +2,18 @@
 
 The External Pod Autoscaler exposes Prometheus metrics from three subsystems: the controller, the scraper, and the webhook (external metrics API). All metrics use the `epa_` prefix.
 
+## Endpoints
+
+The process serves plain HTTP on port 9090 (`METRICS_PORT`):
+
+| Path | Description |
+|------|-------------|
+| `/metrics` | All registered `epa_*` series in Prometheus text format |
+| `/healthz` | 200 while the process serves requests |
+| `/readyz` | 503 until the TLS certificate is loaded, the lease is registered and the active replica set is populated; the body names the pending conditions |
+
+A labeled metric appears in `/metrics` only after its first observation.
+
 ## Controller Metrics
 
 Defined in `src/controller/externalpodautoscaler/telemetry.rs`.
